@@ -45,8 +45,14 @@ function renderPanelStrip() {
     termBtn.textContent = '+ Terminal';
     termBtn.addEventListener('click', () => addPanel('terminal'));
 
+    const fileBtn = document.createElement('button');
+    fileBtn.className = 'add-panel-btn';
+    fileBtn.textContent = '+ Files';
+    fileBtn.addEventListener('click', () => addPanel('file'));
+
     actions.appendChild(webBtn);
     actions.appendChild(termBtn);
+    actions.appendChild(fileBtn);
     empty.appendChild(title);
     empty.appendChild(actions);
     wrapper.appendChild(empty);
@@ -69,8 +75,14 @@ function renderPanelStrip() {
     termBtn.textContent = '+ Terminal';
     termBtn.addEventListener('click', () => addPanel('terminal'));
 
+    const fileBtn = document.createElement('button');
+    fileBtn.className = 'add-panel-btn';
+    fileBtn.textContent = '+ Files';
+    fileBtn.addEventListener('click', () => addPanel('file'));
+
     addControls.appendChild(webBtn);
     addControls.appendChild(termBtn);
+    addControls.appendChild(fileBtn);
     wrapper.appendChild(addControls);
   }
 
@@ -96,7 +108,7 @@ function createPanelElement(panel) {
 
   const typeLabel = document.createElement('span');
   typeLabel.className = 'panel-type-label';
-  typeLabel.textContent = panel.type === 'web' ? 'Web' : 'Terminal';
+  typeLabel.textContent = panel.type === 'web' ? 'Web' : panel.type === 'file' ? 'Files' : 'Terminal';
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'panel-close-btn';
@@ -112,6 +124,8 @@ function createPanelElement(panel) {
 
   if (panel.type === 'web') {
     renderWebPanel(panel, content);
+  } else if (panel.type === 'file') {
+    renderFilePanel(panel, content);
   } else {
     renderTermPanel(panel, content);
   }
@@ -153,6 +167,12 @@ function createResizeHandle(panelId) {
         const { fitAddon } = activeTerminals.get(panelId);
         if (fitAddon) {
           try { fitAddon.fit(); } catch (e) {}
+        }
+      }
+      if (activeEditors.has(panelId)) {
+        const { editor } = activeEditors.get(panelId);
+        if (editor) {
+          try { editor.layout(); } catch (e) {}
         }
       }
     };

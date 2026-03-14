@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -98,6 +98,46 @@ ipcMain.handle('terminal:kill', (_, { id }) => {
   if (term) {
     try { term.kill(); } catch (e) {}
     terminals.delete(id);
+  }
+});
+
+// Directory picker
+ipcMain.handle('dialog:openDirectory', async () => {
+  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { cancelled: true };
+  }
+  return { path: result.filePaths[0] };
+});
+
+// File system IPC
+ipcMain.handle('fs:readDirectory', (_, { dirPath }) => {
+  try {
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const filtered = entries.filter(e => !e.name.startsWith('.'));
+    const dirs = filtered.filter(e => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+    const files = filtered.filter(e => !e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+    return { entries: [...dirs, ...files].map(e => ({ name: e.name, isDirectory: e.isDirectory() })) };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('fs:readFile', (_, { filePath }) => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return { content };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('fs:writeFile', (_, { filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
   }
 });
 

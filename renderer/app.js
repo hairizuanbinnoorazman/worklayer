@@ -2,11 +2,15 @@
 
 const DEFAULT_WEB_WIDTH = 750;
 const DEFAULT_TERM_WIDTH = 620;
+const DEFAULT_FILE_WIDTH = 900;
 
 let state = { activeGroupId: null, groups: [] };
 
 // Map<panelId, { terminal, fitAddon, cleanup, termId }>
 const activeTerminals = new Map();
+
+// Map<panelId, { editor, dispose }>
+const activeEditors = new Map();
 
 let saveDebounceTimer = null;
 
@@ -100,26 +104,58 @@ function killGroupTerminals(group) {
       const { cleanup } = activeTerminals.get(p.id);
       if (cleanup) cleanup();
     }
+    if (p.type === 'file' && activeEditors.has(p.id)) {
+      const { dispose } = activeEditors.get(p.id);
+      if (dispose) dispose();
+    }
   });
 }
 
 // ── Panel operations ──────────────────────────────
 
-function addPanel(type) {
+async function addPanel(type) {
   const group = getActiveGroup();
   if (!group) return;
 
+  let extraProps = {};
+  if (type === 'web') {
+    extraProps = { url: '' };
+  } else if (type === 'file') {
+    const result = await window.electronAPI.openDirectory();
+    if (result.cancelled) return;
+    extraProps = { rootDir: result.path, openFile: null };
+  }
+
+  const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH };
   const panel = {
     id: generateId(),
     type,
-    width: type === 'terminal' ? DEFAULT_TERM_WIDTH : DEFAULT_WEB_WIDTH,
-    ...(type === 'web' ? { url: '' } : {}),
+    width: widths[type] || DEFAULT_WEB_WIDTH,
+    ...extraProps,
   };
 
   group.panels.push(panel);
-  removeCachedGroup(state.activeGroupId);
+
+  // Surgically insert into cached DOM to avoid destroying existing terminals
+  const cached = getCachedContainer(state.activeGroupId);
+  if (cached) {
+    const addControls = cached.querySelector('.add-panel-controls');
+    if (addControls) {
+      // Insert new panel element + resize handle before the add-controls div
+      const panelEl = createPanelElement(panel);
+      const resizeHandle = createResizeHandle(panel.id);
+      cached.insertBefore(panelEl, addControls);
+      cached.insertBefore(resizeHandle, addControls);
+    } else {
+      // Was showing empty state — rebuild entirely
+      removeCachedGroup(state.activeGroupId);
+      renderPanelStrip();
+    }
+  } else {
+    renderPanelStrip();
+  }
+
   saveState();
-  renderPanelStrip();
 }
 
 function removePanel(panelId) {
@@ -130,11 +166,32 @@ function removePanel(panelId) {
     const { cleanup } = activeTerminals.get(panelId);
     if (cleanup) cleanup();
   }
+  if (activeEditors.has(panelId)) {
+    const { dispose } = activeEditors.get(panelId);
+    if (dispose) dispose();
+  }
 
   group.panels = group.panels.filter(p => p.id !== panelId);
-  removeCachedGroup(state.activeGroupId);
+
+  // Surgically remove from cached DOM to avoid destroying existing terminals
+  const cached = getCachedContainer(state.activeGroupId);
+  if (cached && group.panels.length > 0) {
+    const panelEl = cached.querySelector(`[data-panel-id="${panelId}"]`);
+    if (panelEl) {
+      // Remove the adjacent resize handle (next sibling)
+      const resizeHandle = panelEl.nextElementSibling;
+      if (resizeHandle && resizeHandle.classList.contains('resize-handle')) {
+        resizeHandle.remove();
+      }
+      panelEl.remove();
+    }
+  } else {
+    // Group is empty or no cache — rebuild
+    removeCachedGroup(state.activeGroupId);
+    renderPanelStrip();
+  }
+
   saveState();
-  renderPanelStrip();
 }
 
 function updatePanelUrl(panelId, url) {
