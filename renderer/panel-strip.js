@@ -1,6 +1,6 @@
 // panel-strip.js - Panel strip and resize handles with group DOM caching
 
-function renderPanelStrip() {
+function renderPanelStrip(scrollToEnd = true) {
   const strip = document.getElementById('panel-strip');
   const group = getActiveGroup();
   if (!group) return;
@@ -93,7 +93,7 @@ function renderPanelStrip() {
 
   // Scroll to the rightmost panel after adding
   requestAnimationFrame(() => {
-    strip.scrollLeft = strip.scrollWidth;
+    strip.scrollLeft = scrollToEnd ? strip.scrollWidth : 0;
   });
 }
 
