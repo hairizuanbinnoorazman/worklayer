@@ -14,6 +14,7 @@ async function init() {
   const saved = await window.electronAPI.loadState();
   if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
     state = saved;
+    if (!state.maxCachedGroups) state.maxCachedGroups = 5;
     if (!state.groups.find(g => g.id === state.activeGroupId)) {
       state.activeGroupId = state.groups[0].id;
     }
@@ -21,6 +22,7 @@ async function init() {
     const id = generateId();
     state = {
       activeGroupId: id,
+      maxCachedGroups: 5,
       groups: [{ id, label: 'Work 1', panels: [] }],
     };
   }
@@ -58,6 +60,7 @@ function addGroup() {
 function deleteGroup(groupId) {
   const group = state.groups.find(g => g.id === groupId);
   if (group) killGroupTerminals(group);
+  removeCachedGroup(groupId);
 
   state.groups = state.groups.filter(g => g.id !== groupId);
 
@@ -114,6 +117,7 @@ function addPanel(type) {
   };
 
   group.panels.push(panel);
+  removeCachedGroup(state.activeGroupId);
   saveState();
   renderPanelStrip();
 }
@@ -128,6 +132,7 @@ function removePanel(panelId) {
   }
 
   group.panels = group.panels.filter(p => p.id !== panelId);
+  removeCachedGroup(state.activeGroupId);
   saveState();
   renderPanelStrip();
 }

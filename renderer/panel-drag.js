@@ -33,11 +33,13 @@ function onDragMove(e) {
     const indicator = document.createElement('div');
     indicator.className = 'drop-indicator';
     dragState.indicator = indicator;
-    document.getElementById('panel-strip').appendChild(indicator);
+    const container = getCachedContainer(state.activeGroupId);
+    (container || document.getElementById('panel-strip')).appendChild(indicator);
   }
 
-  const strip = document.getElementById('panel-strip');
-  const panels = Array.from(strip.querySelectorAll('.panel:not(.dragging)'));
+  const container = getCachedContainer(state.activeGroupId);
+  const scope = container || document.getElementById('panel-strip');
+  const panels = Array.from(scope.querySelectorAll('.panel:not(.dragging)'));
 
   let insertBeforeEl = null;
   for (const panel of panels) {
@@ -50,16 +52,17 @@ function onDragMove(e) {
   }
 
   // Position the indicator
+  const strip = document.getElementById('panel-strip');
   if (insertBeforeEl) {
     const rect = insertBeforeEl.getBoundingClientRect();
-    const stripRect = strip.getBoundingClientRect();
-    dragState.indicator.style.left = (rect.left - stripRect.left + strip.scrollLeft - 2) + 'px';
+    const scopeRect = scope.getBoundingClientRect();
+    dragState.indicator.style.left = (rect.left - scopeRect.left + scope.scrollLeft - 2) + 'px';
     dragState.indicator.style.display = 'block';
   } else if (panels.length > 0) {
     const lastPanel = panels[panels.length - 1];
     const rect = lastPanel.getBoundingClientRect();
-    const stripRect = strip.getBoundingClientRect();
-    dragState.indicator.style.left = (rect.right - stripRect.left + strip.scrollLeft - 1) + 'px';
+    const scopeRect = scope.getBoundingClientRect();
+    dragState.indicator.style.left = (rect.right - scopeRect.left + scope.scrollLeft - 1) + 'px';
     dragState.indicator.style.display = 'block';
   }
 
@@ -79,7 +82,8 @@ function onDragEnd() {
       dragState.indicator.remove();
     }
 
-    const strip = document.getElementById('panel-strip');
+    const container = getCachedContainer(state.activeGroupId);
+    const scope = container || document.getElementById('panel-strip');
     const panelEl = dragState.panelEl;
     const panelId = panelEl.dataset.panelId;
 
@@ -93,22 +97,21 @@ function onDragEnd() {
 
     if (insertBeforeEl && insertBeforeEl !== panelEl) {
       // Move panel before the target; also move its resize handle
-      strip.insertBefore(panelEl, insertBeforeEl);
+      scope.insertBefore(panelEl, insertBeforeEl);
       if (resizeHandle) {
-        // Place resize handle after the panel
         if (panelEl.nextSibling) {
-          strip.insertBefore(resizeHandle, panelEl.nextSibling);
+          scope.insertBefore(resizeHandle, panelEl.nextSibling);
         } else {
-          strip.appendChild(resizeHandle);
+          scope.appendChild(resizeHandle);
         }
       }
     } else if (!insertBeforeEl) {
       // Move to end (before add-panel-controls)
-      const addControls = strip.querySelector('.add-panel-controls');
+      const addControls = scope.querySelector('.add-panel-controls');
       if (addControls) {
-        strip.insertBefore(panelEl, addControls);
+        scope.insertBefore(panelEl, addControls);
         if (resizeHandle) {
-          strip.insertBefore(resizeHandle, addControls);
+          scope.insertBefore(resizeHandle, addControls);
         }
       }
     }
@@ -131,8 +134,9 @@ function syncPanelOrder() {
   const group = getActiveGroup();
   if (!group) return;
 
-  const strip = document.getElementById('panel-strip');
-  const domPanelIds = Array.from(strip.querySelectorAll('[data-panel-id]'))
+  const container = getCachedContainer(state.activeGroupId);
+  const scope = container || document.getElementById('panel-strip');
+  const domPanelIds = Array.from(scope.querySelectorAll('[data-panel-id]'))
     .map(el => el.dataset.panelId);
 
   const panelMap = new Map(group.panels.map(p => [p.id, p]));

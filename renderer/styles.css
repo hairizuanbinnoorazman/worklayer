@@ -160,6 +160,18 @@ body {
   position: relative;
 }
 
+.group-container {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  gap: 0;
+  position: relative;
+}
+
+.group-container[hidden] {
+  display: none !important;
+}
+
 #panel-strip::-webkit-scrollbar { height: 6px; }
 #panel-strip::-webkit-scrollbar-track { background: #12121e; }
 #panel-strip::-webkit-scrollbar-thumb { background: #334; border-radius: 3px; }

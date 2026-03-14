@@ -1,11 +1,28 @@
-// panel-strip.js - Panel strip and resize handles
+// panel-strip.js - Panel strip and resize handles with group DOM caching
 
 function renderPanelStrip() {
   const strip = document.getElementById('panel-strip');
-  strip.innerHTML = '';
-
   const group = getActiveGroup();
   if (!group) return;
+
+  // Hide all cached group containers
+  groupDOMCache.forEach(container => {
+    container.hidden = true;
+  });
+
+  // Check for cache hit
+  const cached = getCachedContainer(group.id);
+  if (cached) {
+    cached.hidden = false;
+    touchLRU(group.id);
+    requestAnimationFrame(() => fitVisibleTerminals(group.id));
+    return;
+  }
+
+  // Cache miss - build fresh
+  const wrapper = document.createElement('div');
+  wrapper.className = 'group-container';
+  wrapper.dataset.groupId = group.id;
 
   if (group.panels.length === 0) {
     const empty = document.createElement('div');
@@ -32,31 +49,35 @@ function renderPanelStrip() {
     actions.appendChild(termBtn);
     empty.appendChild(title);
     empty.appendChild(actions);
-    strip.appendChild(empty);
-    return;
+    wrapper.appendChild(empty);
+  } else {
+    group.panels.forEach((panel) => {
+      wrapper.appendChild(createPanelElement(panel));
+      wrapper.appendChild(createResizeHandle(panel.id));
+    });
+
+    const addControls = document.createElement('div');
+    addControls.className = 'add-panel-controls';
+
+    const webBtn = document.createElement('button');
+    webBtn.className = 'add-panel-btn';
+    webBtn.textContent = '+ Web';
+    webBtn.addEventListener('click', () => addPanel('web'));
+
+    const termBtn = document.createElement('button');
+    termBtn.className = 'add-panel-btn';
+    termBtn.textContent = '+ Terminal';
+    termBtn.addEventListener('click', () => addPanel('terminal'));
+
+    addControls.appendChild(webBtn);
+    addControls.appendChild(termBtn);
+    wrapper.appendChild(addControls);
   }
 
-  group.panels.forEach((panel, index) => {
-    strip.appendChild(createPanelElement(panel));
-    strip.appendChild(createResizeHandle(panel.id));
-  });
-
-  const addControls = document.createElement('div');
-  addControls.className = 'add-panel-controls';
-
-  const webBtn = document.createElement('button');
-  webBtn.className = 'add-panel-btn';
-  webBtn.textContent = '+ Web';
-  webBtn.addEventListener('click', () => addPanel('web'));
-
-  const termBtn = document.createElement('button');
-  termBtn.className = 'add-panel-btn';
-  termBtn.textContent = '+ Terminal';
-  termBtn.addEventListener('click', () => addPanel('terminal'));
-
-  addControls.appendChild(webBtn);
-  addControls.appendChild(termBtn);
-  strip.appendChild(addControls);
+  strip.appendChild(wrapper);
+  cacheContainer(group.id, wrapper);
+  touchLRU(group.id);
+  evictLRU();
 
   // Scroll to the rightmost panel after adding
   requestAnimationFrame(() => {
@@ -79,7 +100,7 @@ function createPanelElement(panel) {
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'panel-close-btn';
-  closeBtn.textContent = '×';
+  closeBtn.textContent = '\u00d7';
   closeBtn.addEventListener('click', () => removePanel(panel.id));
 
   header.appendChild(typeLabel);
@@ -122,7 +143,10 @@ function createResizeHandle(panelId) {
       const newWidth = Math.max(300, startWidth + (e.clientX - startX));
       updatePanelWidth(panelId, newWidth);
 
-      const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+      const container = getCachedContainer(state.activeGroupId);
+      const panelEl = container
+        ? container.querySelector(`[data-panel-id="${panelId}"]`)
+        : document.querySelector(`[data-panel-id="${panelId}"]`);
       if (panelEl) panelEl.style.width = newWidth + 'px';
 
       if (activeTerminals.has(panelId)) {
