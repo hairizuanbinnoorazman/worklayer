@@ -88,7 +88,7 @@ function addGroupWithPanels(name, panelConfigs) {
   state.activeGroupId = id;
   saveState();
   renderSidebar();
-  renderPanelStrip();
+  renderPanelStrip(false);
 }
 
 function saveTemplate(name, panelConfigs) {
