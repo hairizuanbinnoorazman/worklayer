@@ -102,7 +102,7 @@ ipcMain.handle('terminal:kill', (_, { id }) => {
 });
 
 app.whenReady().then(() => {
-  STATE_FILE = path.join(app.getPath('userData'), 'ppp-state.json');
+  STATE_FILE = path.join(app.getPath('userData'), 'worklayer-state.json');
   createWindow();
 });
 

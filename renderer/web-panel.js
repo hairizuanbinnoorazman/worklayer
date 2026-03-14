@@ -75,6 +75,22 @@ function renderWebPanel(panel, container) {
     }
   });
 
+  webview.addEventListener('did-fail-load', e => {
+    if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
+    const errorPage = `
+      <html>
+      <body style="font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
+        <div style="text-align: center; max-width: 480px; padding: 2rem;">
+          <div style="font-size: 3rem; margin-bottom: 1rem;">⚠</div>
+          <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
+          <p style="color: #a6adc8; margin: 0 0 1rem;">${e.validatedURL || ''}</p>
+          <p style="color: #f38ba8;">${e.errorDescription || 'Unknown error'} (${e.errorCode})</p>
+        </div>
+      </body>
+      </html>`;
+    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+  });
+
   webview.addEventListener('page-title-updated', e => {
     // Update the panel header label with the page title
     const panelEl = webview.closest('.panel');
