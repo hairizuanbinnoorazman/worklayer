@@ -70,7 +70,7 @@ function addGroupWithPanels(name, panelConfigs) {
     const panel = {
       id: generateId(),
       type: config.type,
-      width: widths[config.type] || DEFAULT_WEB_WIDTH,
+      width: (widths[config.type] || DEFAULT_WEB_WIDTH) * (config.widthMultiplier || 1),
     };
     if (config.type === 'terminal') {
       if (config.cwd) panel.cwd = config.cwd;

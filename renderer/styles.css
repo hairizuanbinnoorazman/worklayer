@@ -783,13 +783,48 @@ webview {
   border: none;
   color: #556;
   flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 2px;
 }
 
 .modal-btn-remove:hover {
   color: #ff6b6b;
   background: #3a1a1a;
+}
+
+.modal-width-select {
+  flex-shrink: 0;
+  width: 80px;
+}
+
+.modal-panel-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+.modal-btn-reorder {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border: none;
+  color: #667;
+  cursor: pointer;
+  background: none;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.modal-btn-reorder:hover:not(:disabled) {
+  color: #ccc;
+  background: #2a2a4e;
+}
+
+.modal-btn-reorder-disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 
 .modal-btn-browse {

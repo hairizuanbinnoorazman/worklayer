@@ -148,6 +148,21 @@ function showWorkspaceModal() {
       });
       rowEl.appendChild(typeSelect);
 
+      // Width selector
+      const widthSelect = document.createElement('select');
+      widthSelect.className = 'modal-select modal-width-select';
+      [{ value: '1', label: 'Normal' }, { value: '2', label: 'Wide' }].forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.value;
+        opt.textContent = w.label;
+        if (String(row.widthMultiplier || 1) === w.value) opt.selected = true;
+        widthSelect.appendChild(opt);
+      });
+      widthSelect.addEventListener('change', () => {
+        panelRows[index].widthMultiplier = parseInt(widthSelect.value, 10);
+      });
+      rowEl.appendChild(widthSelect);
+
       // Type-specific fields
       const fields = document.createElement('div');
       fields.className = 'modal-panel-fields';
@@ -176,6 +191,44 @@ function showWorkspaceModal() {
 
       rowEl.appendChild(fields);
 
+      // Panel row controls (reorder + remove)
+      const controls = document.createElement('div');
+      controls.className = 'modal-panel-controls';
+
+      // Up button
+      const upBtn = document.createElement('button');
+      upBtn.className = 'modal-btn modal-btn-reorder';
+      upBtn.textContent = '\u25B2';
+      upBtn.title = 'Move up';
+      if (index === 0) {
+        upBtn.disabled = true;
+        upBtn.classList.add('modal-btn-reorder-disabled');
+      }
+      upBtn.addEventListener('click', () => {
+        if (index > 0) {
+          [panelRows[index - 1], panelRows[index]] = [panelRows[index], panelRows[index - 1]];
+          renderPanelList();
+        }
+      });
+      controls.appendChild(upBtn);
+
+      // Down button
+      const downBtn = document.createElement('button');
+      downBtn.className = 'modal-btn modal-btn-reorder';
+      downBtn.textContent = '\u25BC';
+      downBtn.title = 'Move down';
+      if (index === panelRows.length - 1) {
+        downBtn.disabled = true;
+        downBtn.classList.add('modal-btn-reorder-disabled');
+      }
+      downBtn.addEventListener('click', () => {
+        if (index < panelRows.length - 1) {
+          [panelRows[index], panelRows[index + 1]] = [panelRows[index + 1], panelRows[index]];
+          renderPanelList();
+        }
+      });
+      controls.appendChild(downBtn);
+
       // Remove button
       const removeBtn = document.createElement('button');
       removeBtn.className = 'modal-btn modal-btn-remove';
@@ -185,7 +238,9 @@ function showWorkspaceModal() {
         panelRows.splice(index, 1);
         renderPanelList();
       });
-      rowEl.appendChild(removeBtn);
+      controls.appendChild(removeBtn);
+
+      rowEl.appendChild(controls);
 
       panelList.appendChild(rowEl);
     });
