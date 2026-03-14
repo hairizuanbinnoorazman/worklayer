@@ -16,6 +16,7 @@ function renderPanelStrip(scrollToEnd = true) {
     cached.hidden = false;
     touchLRU(group.id);
     requestAnimationFrame(() => fitVisibleTerminals(group.id));
+    renderStatusBar();
     return;
   }
 
@@ -90,6 +91,8 @@ function renderPanelStrip(scrollToEnd = true) {
   cacheContainer(group.id, wrapper);
   touchLRU(group.id);
   evictLRU();
+
+  renderStatusBar();
 
   // Scroll to the rightmost panel after adding
   requestAnimationFrame(() => {
