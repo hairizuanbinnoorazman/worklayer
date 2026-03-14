@@ -148,6 +148,8 @@ ipcMain.handle('fs:writeFile', (_, { filePath, content }) => {
   }
 });
 
+app.disableHardwareAcceleration();
+
 app.whenReady().then(() => {
   STATE_FILE = path.join(app.getPath('userData'), 'worklayer-state.json');
   createWindow();
