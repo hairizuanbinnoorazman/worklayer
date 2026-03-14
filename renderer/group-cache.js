@@ -17,6 +17,7 @@ function evictLRU() {
   const max = getMaxCached();
   while (lruOrder.length > max) {
     const evictId = lruOrder.shift();
+    console.log(`[GroupCache] Evicting group=${evictId} (cached=${groupDOMCache.size} max=${max})`);
     const el = groupDOMCache.get(evictId);
     if (el) {
       el.remove();
@@ -28,7 +29,9 @@ function evictLRU() {
 }
 
 function getCachedContainer(groupId) {
-  return groupDOMCache.get(groupId) || null;
+  const cached = groupDOMCache.get(groupId) || null;
+  console.log(`[GroupCache] ${cached ? 'HIT' : 'MISS'} group=${groupId}`);
+  return cached;
 }
 
 function cacheContainer(groupId, el) {
@@ -36,6 +39,7 @@ function cacheContainer(groupId, el) {
 }
 
 function removeCachedGroup(groupId) {
+  console.log(`[GroupCache] Removing cached group=${groupId}`);
   const el = groupDOMCache.get(groupId);
   if (el) {
     el.remove();

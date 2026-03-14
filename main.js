@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -146,6 +146,24 @@ ipcMain.handle('fs:writeFile', (_, { filePath, content }) => {
   } catch (e) {
     return { error: e.message };
   }
+});
+
+// Debug cookie inspection for persist:webpanels partition
+ipcMain.handle('debug:getCookies', async (_, { url }) => {
+  const ses = session.fromPartition('persist:webpanels');
+  const cookies = await ses.cookies.get({ url });
+  return cookies;
+});
+
+ipcMain.handle('debug:getCookieCount', async () => {
+  const ses = session.fromPartition('persist:webpanels');
+  const cookies = await ses.cookies.get({});
+  const sessionCookies = cookies.filter(c => !c.expirationDate);
+  return {
+    total: cookies.length,
+    session: sessionCookies.length,
+    persistent: cookies.length - sessionCookies.length,
+  };
 });
 
 app.disableHardwareAcceleration();

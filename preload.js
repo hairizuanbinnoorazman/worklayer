@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.once(channel, callback);
   },
 
+  debugGetCookies: (url) => ipcRenderer.invoke('debug:getCookies', { url }),
+  debugGetCookieCount: () => ipcRenderer.invoke('debug:getCookieCount'),
+
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   readDirectory: (dirPath) => ipcRenderer.invoke('fs:readDirectory', { dirPath }),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', { filePath }),

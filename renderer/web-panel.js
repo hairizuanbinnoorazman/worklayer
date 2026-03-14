@@ -33,8 +33,11 @@ function renderWebPanel(panel, container) {
 
   const webview = document.createElement('webview');
   webview.setAttribute('allowpopups', '');
+  webview.setAttribute('partition', 'persist:webpanels');
   webview.src = panel.url || 'about:blank';
   container.appendChild(webview);
+
+  console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
   const navigate = (raw) => {
     let url = raw.trim();
@@ -63,9 +66,19 @@ function renderWebPanel(panel, container) {
   // Stop propagation so clicks in the URL bar don't lose focus unexpectedly
   urlInput.addEventListener('mousedown', e => e.stopPropagation());
 
+  webview.addEventListener('dom-ready', () => {
+    console.log(`[WebPanel] dom-ready panel=${panel.id}`);
+  });
+
   webview.addEventListener('did-navigate', e => {
+    console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     urlInput.value = e.url;
     updatePanelUrl(panel.id, e.url);
+    if (window.electronAPI.debugGetCookieCount) {
+      window.electronAPI.debugGetCookieCount().then(info => {
+        console.log(`[WebPanel] Cookies after navigate: total=${info.total} session=${info.session} persistent=${info.persistent}`);
+      }).catch(() => {});
+    }
   });
 
   webview.addEventListener('did-navigate-in-page', e => {
@@ -76,6 +89,7 @@ function renderWebPanel(panel, container) {
   });
 
   webview.addEventListener('did-fail-load', e => {
+    console.log(`[WebPanel] did-fail-load panel=${panel.id} error=${e.errorDescription} code=${e.errorCode} url=${e.validatedURL}`);
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
     const errorPage = `
       <html>
