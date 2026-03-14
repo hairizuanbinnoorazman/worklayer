@@ -36,9 +36,9 @@ async function mountTerminal(panel, container) {
   terminal.loadAddon(fitAddon);
   terminal.open(container);
 
-  requestAnimationFrame(() => {
-    try { fitAddon.fit(); } catch (e) {}
-  });
+  // Wait for DOM layout to settle, then fit before creating the PTY
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  try { fitAddon.fit(); } catch (e) {}
 
   // Spawn the pty process
   const { id: termId, error } = await window.electronAPI.createTerminal({
