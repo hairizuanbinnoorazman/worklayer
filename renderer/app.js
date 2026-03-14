@@ -4,6 +4,10 @@ const DEFAULT_WEB_WIDTH = 750;
 const DEFAULT_TERM_WIDTH = 620;
 const DEFAULT_FILE_WIDTH = 900;
 
+const MAX_TERMINAL_PANELS = 20;
+const MAX_WEB_PANELS = 20;
+const MAX_FILE_PANELS = 10;
+
 let state = { activeGroupId: null, groups: [], templates: [] };
 
 // Map<panelId, { terminal, fitAddon, cleanup, termId }>
@@ -163,6 +167,11 @@ async function addPanel(type) {
   const group = getActiveGroup();
   if (!group) return;
 
+  const maxLimits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  const maxForType = maxLimits[type];
+  const globalCount = state.groups.flatMap(g => g.panels).filter(p => p.type === type).length;
+  if (maxForType && globalCount >= maxForType) return;
+
   let extraProps = {};
   if (type === 'web') {
     extraProps = { url: '' };
@@ -192,6 +201,7 @@ async function addPanel(type) {
       const resizeHandle = createResizeHandle(panel.id);
       cached.insertBefore(panelEl, addControls);
       cached.insertBefore(resizeHandle, addControls);
+      renderStatusBar();
     } else {
       // Was showing empty state — rebuild entirely
       removeCachedGroup(state.activeGroupId);
@@ -231,6 +241,7 @@ function removePanel(panelId) {
       }
       panelEl.remove();
     }
+    renderStatusBar();
   } else {
     // Group is empty or no cache — rebuild
     removeCachedGroup(state.activeGroupId);
