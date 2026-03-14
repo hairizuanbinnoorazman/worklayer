@@ -157,6 +157,7 @@ body {
   overflow-y: hidden;
   padding: 12px 12px 12px 12px;
   gap: 0;
+  position: relative;
 }
 
 #panel-strip::-webkit-scrollbar { height: 6px; }
@@ -205,6 +206,7 @@ body {
   border-bottom: 1px solid #2a2a3e;
   gap: 8px;
   flex-shrink: 0;
+  cursor: grab;
 }
 
 .panel-type-label {
@@ -227,6 +229,24 @@ body {
 }
 
 .panel-close-btn:hover { color: #ff6b6b; background: #3a1a1a; }
+
+.panel.dragging {
+  opacity: 0.5;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.drop-indicator {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  background: #533483;
+  border-radius: 2px;
+  z-index: 200;
+  pointer-events: none;
+  display: none;
+}
 
 .panel-content {
   flex: 1;

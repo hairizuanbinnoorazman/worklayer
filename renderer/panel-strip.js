@@ -38,7 +38,7 @@ function renderPanelStrip() {
 
   group.panels.forEach((panel, index) => {
     strip.appendChild(createPanelElement(panel));
-    strip.appendChild(createResizeHandle(panel.id, index));
+    strip.appendChild(createResizeHandle(panel.id));
   });
 
   const addControls = document.createElement('div');
@@ -96,10 +96,11 @@ function createPanelElement(panel) {
   }
 
   el.appendChild(content);
+  initPanelDrag(el);
   return el;
 }
 
-function createResizeHandle(panelId, index) {
+function createResizeHandle(panelId) {
   const handle = document.createElement('div');
   handle.className = 'resize-handle';
 
@@ -111,7 +112,8 @@ function createResizeHandle(panelId, index) {
     startX = e.clientX;
 
     const group = getActiveGroup();
-    const panel = group.panels[index];
+    const panel = group.panels.find(p => p.id === panelId);
+    if (!panel) return;
     startWidth = panel.width;
 
     handle.classList.add('active');
