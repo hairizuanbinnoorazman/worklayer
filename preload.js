@@ -20,4 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const channel = `terminal:exit:${id}`;
     ipcRenderer.once(channel, callback);
   },
+
+  openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
+  readDirectory: (dirPath) => ipcRenderer.invoke('fs:readDirectory', { dirPath }),
+  readFile: (filePath) => ipcRenderer.invoke('fs:readFile', { filePath }),
+  writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', { filePath, content }),
 });
