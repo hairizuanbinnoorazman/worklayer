@@ -52,7 +52,7 @@ ipcMain.handle('state:save', (_, state) => {
 });
 
 // Terminal IPC
-ipcMain.handle('terminal:create', (event, { cols, rows }) => {
+ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) => {
   if (!pty) return { error: 'node-pty not available. Run: npm run postinstall' };
 
   const id = ++termIdCounter;
@@ -60,11 +60,13 @@ ipcMain.handle('terminal:create', (event, { cols, rows }) => {
     ? 'powershell.exe'
     : (process.env.SHELL || '/bin/bash');
 
+  const spawnCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+
   const term = pty.spawn(shell, [], {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
-    cwd: os.homedir(),
+    cwd: spawnCwd,
     env: process.env,
   });
 
@@ -78,6 +80,11 @@ ipcMain.handle('terminal:create', (event, { cols, rows }) => {
   });
 
   terminals.set(id, term);
+
+  if (initialCommand) {
+    term.write(initialCommand + '\r');
+  }
+
   return { id };
 });
 

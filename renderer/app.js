@@ -4,7 +4,7 @@ const DEFAULT_WEB_WIDTH = 750;
 const DEFAULT_TERM_WIDTH = 620;
 const DEFAULT_FILE_WIDTH = 900;
 
-let state = { activeGroupId: null, groups: [] };
+let state = { activeGroupId: null, groups: [], templates: [] };
 
 // Map<panelId, { terminal, fitAddon, cleanup, termId }>
 const activeTerminals = new Map();
@@ -19,6 +19,7 @@ async function init() {
   if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
     state = saved;
     if (!state.maxCachedGroups) state.maxCachedGroups = 5;
+    if (!state.templates) state.templates = [];
     if (!state.groups.find(g => g.id === state.activeGroupId)) {
       state.activeGroupId = state.groups[0].id;
     }
@@ -59,6 +60,51 @@ function addGroup() {
   saveState();
   renderSidebar();
   renderPanelStrip();
+}
+
+function addGroupWithPanels(name, panelConfigs) {
+  const id = generateId();
+  const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH };
+
+  const panels = panelConfigs.map(config => {
+    const panel = {
+      id: generateId(),
+      type: config.type,
+      width: widths[config.type] || DEFAULT_WEB_WIDTH,
+    };
+    if (config.type === 'terminal') {
+      if (config.cwd) panel.cwd = config.cwd;
+      if (config.initialCommand) panel.initialCommand = config.initialCommand;
+    } else if (config.type === 'web') {
+      panel.url = config.url || '';
+    } else if (config.type === 'file') {
+      panel.rootDir = config.rootDir || '';
+      panel.openFile = null;
+    }
+    return panel;
+  });
+
+  state.groups.push({ id, label: name || `Work ${state.groups.length + 1}`, panels });
+  state.activeGroupId = id;
+  saveState();
+  renderSidebar();
+  renderPanelStrip();
+}
+
+function saveTemplate(name, panelConfigs) {
+  const template = {
+    id: generateId(),
+    name,
+    panels: panelConfigs.map(config => ({ ...config })),
+  };
+  state.templates.push(template);
+  saveState();
+  return template;
+}
+
+function deleteTemplate(templateId) {
+  state.templates = state.templates.filter(t => t.id !== templateId);
+  saveState();
 }
 
 function deleteGroup(groupId) {

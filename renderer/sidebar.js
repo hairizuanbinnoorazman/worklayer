@@ -51,7 +51,7 @@ function renderSidebar() {
   const addBtn = document.createElement('button');
   addBtn.className = 'add-group-btn';
   addBtn.textContent = '+ New Workspace';
-  addBtn.addEventListener('click', addGroup);
+  addBtn.addEventListener('click', () => showWorkspaceModal());
   sidebar.appendChild(addBtn);
 }
 

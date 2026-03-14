@@ -44,6 +44,8 @@ async function mountTerminal(panel, container) {
   const { id: termId, error } = await window.electronAPI.createTerminal({
     cols: terminal.cols,
     rows: terminal.rows,
+    cwd: panel.cwd || undefined,
+    initialCommand: panel.initialCommand || undefined,
   });
 
   if (error) {
