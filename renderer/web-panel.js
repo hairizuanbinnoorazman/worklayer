@@ -79,7 +79,7 @@ function renderWebPanel(panel, container) {
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
     const errorPage = `
       <html>
-      <body style="font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
+      <body style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
         <div style="text-align: center; max-width: 480px; padding: 2rem;">
           <div style="font-size: 3rem; margin-bottom: 1rem;">⚠</div>
           <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
