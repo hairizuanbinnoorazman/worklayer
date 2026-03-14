@@ -9,7 +9,12 @@ Inspired by [Niri](https://wiki.archlinux.org/title/Niri)'s scrollable tiling wi
 - **Workspaces** — organize panels into named groups by unit of work
 - **Web panels** — embedded browser with back/forward/refresh navigation
 - **Terminal panels** — persistent shell sessions powered by xterm.js and node-pty
+- **File panels** — file browser + Monaco code editor with syntax highlighting
+- **Templates** — save and reuse workspace configurations
+- **Panel reordering** — drag panels to reorder within a workspace
 - **Drag-to-resize** — adjust panel widths with drag handles
+- **Status bar** — real-time panel counts and limits display
+- **DOM caching** — smart caching prevents terminal re-initialization when switching workspaces
 - **Auto-saved state** — workspace layout and panel state persist across restarts
 
 ## Project Structure
@@ -26,7 +31,12 @@ worklayer/
     ├── sidebar.js        Workspace sidebar component
     ├── panel-strip.js    Horizontal panel area component
     ├── web-panel.js      Web panel (webview) component
-    └── term-panel.js     Terminal panel (xterm.js) component
+    ├── term-panel.js     Terminal panel (xterm.js) component
+    ├── file-panel.js     File browser + Monaco editor component
+    ├── workspace-modal.js Modal for creating/configuring workspaces
+    ├── status-bar.js     Panel count status indicator
+    ├── group-cache.js    DOM caching mechanism
+    └── panel-drag.js     Drag-to-resize and reorder handles
 ```
 
 ## Dependencies
@@ -37,6 +47,7 @@ worklayer/
 | `node-pty` ^1.0 | Native pseudoterminal (requires rebuild for Electron) |
 | `@xterm/xterm` ^6 | Terminal UI in the renderer |
 | `@xterm/addon-fit` ^0.11 | Resizes xterm to fill its container |
+| `monaco-editor` ^0.55 | Code editor and syntax highlighting |
 | `@electron/rebuild` ^4 | Rebuilds native modules for the installed Electron version |
 
 ## Setup
