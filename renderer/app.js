@@ -135,9 +135,27 @@ async function addPanel(type) {
   };
 
   group.panels.push(panel);
-  removeCachedGroup(state.activeGroupId);
+
+  // Surgically insert into cached DOM to avoid destroying existing terminals
+  const cached = getCachedContainer(state.activeGroupId);
+  if (cached) {
+    const addControls = cached.querySelector('.add-panel-controls');
+    if (addControls) {
+      // Insert new panel element + resize handle before the add-controls div
+      const panelEl = createPanelElement(panel);
+      const resizeHandle = createResizeHandle(panel.id);
+      cached.insertBefore(panelEl, addControls);
+      cached.insertBefore(resizeHandle, addControls);
+    } else {
+      // Was showing empty state — rebuild entirely
+      removeCachedGroup(state.activeGroupId);
+      renderPanelStrip();
+    }
+  } else {
+    renderPanelStrip();
+  }
+
   saveState();
-  renderPanelStrip();
 }
 
 function removePanel(panelId) {
@@ -154,9 +172,26 @@ function removePanel(panelId) {
   }
 
   group.panels = group.panels.filter(p => p.id !== panelId);
-  removeCachedGroup(state.activeGroupId);
+
+  // Surgically remove from cached DOM to avoid destroying existing terminals
+  const cached = getCachedContainer(state.activeGroupId);
+  if (cached && group.panels.length > 0) {
+    const panelEl = cached.querySelector(`[data-panel-id="${panelId}"]`);
+    if (panelEl) {
+      // Remove the adjacent resize handle (next sibling)
+      const resizeHandle = panelEl.nextElementSibling;
+      if (resizeHandle && resizeHandle.classList.contains('resize-handle')) {
+        resizeHandle.remove();
+      }
+      panelEl.remove();
+    }
+  } else {
+    // Group is empty or no cache — rebuild
+    removeCachedGroup(state.activeGroupId);
+    renderPanelStrip();
+  }
+
   saveState();
-  renderPanelStrip();
 }
 
 function updatePanelUrl(panelId, url) {
