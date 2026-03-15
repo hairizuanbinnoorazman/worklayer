@@ -243,6 +243,62 @@ body {
   min-width: 300px;
 }
 
+.panel-focused {
+  box-shadow: 0 0 12px 2px rgba(83, 52, 131, 0.35);
+  border-color: #533483;
+}
+
+/* ── Panel search bar ───────────────────────────── */
+
+.panel-search-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 7px;
+  background: #22223a;
+  border-bottom: 1px solid #2a2a3e;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.panel-search-bar[hidden] {
+  display: none;
+}
+
+.panel-search-input {
+  flex: 1;
+  background: #12121e;
+  border: 1px solid #334;
+  color: #ccc;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+  user-select: text;
+}
+
+.panel-search-input:focus {
+  border-color: #533483;
+  color: #e0e0e0;
+}
+
+.panel-search-btn {
+  background: none;
+  border: 1px solid #334;
+  color: #889;
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+
+.panel-search-btn:hover {
+  background: #2a2a4e;
+  color: #e0e0e0;
+  border-color: #533483;
+}
+
 .panel-header {
   display: flex;
   align-items: center;

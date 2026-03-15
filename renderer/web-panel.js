@@ -203,6 +203,39 @@ function renderWebPanel(panel, container) {
     webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
   });
 
+  // Focus tracking when webview gains focus
+  webview.addEventListener('focus', () => {
+    setFocusedPanel(panel.id);
+  });
+
+  // Inject Cmd+F interceptor into webview guest pages.
+  // Key events inside a webview don't bubble to the parent document,
+  // so we inject a listener and use console-message as a back-channel.
+  const injectSearchInterceptor = () => {
+    webview.executeJavaScript(`
+      if (!window.__panelSearchInjected) {
+        window.__panelSearchInjected = true;
+        document.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('__PANEL_SEARCH_CMD_F__');
+          }
+        }, true);
+      }
+    `).catch(() => {});
+  };
+
+  webview.addEventListener('dom-ready', injectSearchInterceptor);
+  webview.addEventListener('did-navigate', injectSearchInterceptor);
+
+  webview.addEventListener('console-message', e => {
+    if (e.message === '__PANEL_SEARCH_CMD_F__') {
+      setFocusedPanel(panel.id);
+      showPanelSearch(panel.id);
+    }
+  });
+
   webview.addEventListener('page-title-updated', e => {
     // Update the panel header label with the page title
     const panelEl = webview.closest('.panel');
