@@ -51,6 +51,13 @@ function createWindow() {
     },
   });
 
+  win.on('close', () => {
+    for (const [id, term] of terminals) {
+      try { term.kill(); } catch (e) {}
+    }
+    terminals.clear();
+  });
+
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
@@ -96,12 +103,16 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) =
   });
 
   term.onData((data) => {
-    event.sender.send(`terminal:data:${id}`, data);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send(`terminal:data:${id}`, data);
+    }
   });
 
   term.onExit(() => {
     terminals.delete(id);
-    event.sender.send(`terminal:exit:${id}`);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send(`terminal:exit:${id}`);
+    }
   });
 
   terminals.set(id, term);
