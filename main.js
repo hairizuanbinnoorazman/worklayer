@@ -14,6 +14,8 @@ process.on('unhandledRejection', (reason) => {
   debugLog('Unhandled rejection:', String(reason), reason?.stack || '');
 });
 
+const lspManager = require('./lsp-manager');
+
 let pty;
 try {
   pty = require('node-pty');
@@ -52,6 +54,7 @@ function createWindow() {
   });
 
   win.on('close', () => {
+    lspManager.stopAllServers();
     for (const [id, term] of terminals) {
       try { term.kill(); } catch (e) {}
     }
@@ -202,6 +205,48 @@ ipcMain.handle('debug:getCookieCount', async () => {
   };
 });
 
+// LSP IPC handlers
+ipcMain.handle('lsp:getRegistry', () => {
+  debugLog('[IPC] lsp:getRegistry');
+  return lspManager.getServerRegistry();
+});
+
+ipcMain.handle('lsp:startServer', async (event, { groupId, rootDir, serverKey }) => {
+  debugLog(`[IPC] lsp:startServer serverKey=${serverKey} rootDir=${rootDir}`);
+  const result = await lspManager.startServer(event.sender, { groupId, rootDir, serverKey });
+  debugLog(`[IPC] lsp:startServer result:`, JSON.stringify(result));
+  return result;
+});
+
+ipcMain.handle('lsp:stopServer', (_, { serverId }) => {
+  debugLog(`[IPC] lsp:stopServer serverId=${serverId}`);
+  lspManager.stopServer(serverId);
+  return { success: true };
+});
+
+ipcMain.handle('lsp:getActiveServers', (_, { groupId }) => {
+  debugLog(`[IPC] lsp:getActiveServers groupId=${groupId}`);
+  return lspManager.getActiveServers(groupId);
+});
+
+ipcMain.handle('lsp:sendRequest', async (_, { serverId, method, params }) => {
+  debugLog(`[IPC] lsp:sendRequest serverId=${serverId} method=${method}`);
+  try {
+    const result = await lspManager.sendRequest(serverId, method, params);
+    debugLog(`[IPC] lsp:sendRequest response for ${method}: hasResult=${!!result?.result} hasError=${!!result?.error}`);
+    return result;
+  } catch (e) {
+    debugLog(`[IPC] lsp:sendRequest error for ${method}: ${e.message}`);
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('lsp:sendNotification', (_, { serverId, method, params }) => {
+  debugLog(`[IPC] lsp:sendNotification serverId=${serverId} method=${method}`);
+  lspManager.sendNotification(serverId, method, params);
+  return { success: true };
+});
+
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
@@ -303,6 +348,7 @@ app.on('window-all-closed', () => {
   debugLog('[window-all-closed] saving cookies and cleaning up');
   clearInterval(cookieSaveInterval);
   saveSessionCookies();
+  lspManager.stopAllServers();
   for (const [, term] of terminals) {
     try { term.kill(); } catch (e) {}
   }

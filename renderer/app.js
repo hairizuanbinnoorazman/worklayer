@@ -17,6 +17,9 @@ const activeTerminals = new Map();
 // Map<panelId, { editor, dispose }>
 const activeEditors = new Map();
 
+// Map<serverId, { groupId, serverKey, cleanup }>
+const activeLspServers = new Map();
+
 let saveDebounceTimer = null;
 
 async function init() {
@@ -26,6 +29,10 @@ async function init() {
     if (!state.maxCachedGroups) state.maxCachedGroups = 5;
     if (!state.templates) state.templates = [];
     if (!state.urlHistory) state.urlHistory = [];
+    // Migrate: ensure all groups have lspServers
+    for (const group of state.groups) {
+      group.lspServers = group.lspServers || [];
+    }
     if (!state.groups.find(g => g.id === state.activeGroupId)) {
       state.activeGroupId = state.groups[0].id;
     }
@@ -34,7 +41,7 @@ async function init() {
     state = {
       activeGroupId: id,
       maxCachedGroups: 5,
-      groups: [{ id, label: 'Work 1', panels: [] }],
+      groups: [{ id, label: 'Work 1', panels: [], lspServers: [] }],
     };
   }
 
@@ -61,7 +68,7 @@ function getActiveGroup() {
 
 function addGroup() {
   const id = generateId();
-  state.groups.push({ id, label: `Work ${state.groups.length + 1}`, panels: [] });
+  state.groups.push({ id, label: `Work ${state.groups.length + 1}`, panels: [], lspServers: [] });
   state.activeGroupId = id;
   saveState();
   renderSidebar();
@@ -90,7 +97,7 @@ function addGroupWithPanels(name, panelConfigs) {
     return panel;
   });
 
-  state.groups.push({ id, label: name || `Work ${state.groups.length + 1}`, panels });
+  state.groups.push({ id, label: name || `Work ${state.groups.length + 1}`, panels, lspServers: [] });
   state.activeGroupId = id;
   saveState();
   renderSidebar();
@@ -122,7 +129,7 @@ function deleteGroup(groupId) {
 
   if (state.groups.length === 0) {
     const id = generateId();
-    state.groups.push({ id, label: 'Work 1', panels: [] });
+    state.groups.push({ id, label: 'Work 1', panels: [], lspServers: [] });
   }
   if (!state.groups.find(g => g.id === state.activeGroupId)) {
     state.activeGroupId = state.groups[0].id;

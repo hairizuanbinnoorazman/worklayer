@@ -1,0 +1,280 @@
+// lsp-bridge.js - Renderer-side LSP client bridge
+
+// Map<serverId, { cleanupNotifications, providers[] }>
+const activeLspConnections = new Map();
+
+// Debounce timers for didChange per filePath
+const didChangeTimers = new Map();
+
+const DIDCHANGE_DEBOUNCE_MS = 300;
+
+// --- LSP <-> Monaco coordinate mapping ---
+// LSP: 0-based line/char, Monaco: 1-based line/column
+
+function lspPosToMonaco(pos) {
+  return { lineNumber: pos.line + 1, column: pos.character + 1 };
+}
+
+function monacoPositionToLsp(pos) {
+  return { line: pos.lineNumber - 1, character: pos.column - 1 };
+}
+
+function lspRangeToMonaco(range) {
+  return {
+    startLineNumber: range.start.line + 1,
+    startColumn: range.start.character + 1,
+    endLineNumber: range.end.line + 1,
+    endColumn: range.end.character + 1,
+  };
+}
+
+function lspSeverityToMonaco(severity) {
+  switch (severity) {
+    case 1: return 8;  // Error
+    case 2: return 4;  // Warning
+    case 3: return 2;  // Info
+    case 4: return 1;  // Hint
+    default: return 2;
+  }
+}
+
+function filePathToUri(filePath) {
+  // Use Monaco's URI builder for consistent encoding with model URIs
+  if (window.monaco) return monaco.Uri.file(filePath).toString();
+  return 'file://' + filePath;
+}
+
+function uriToFilePath(uri) {
+  if (uri.startsWith('file://')) return decodeURIComponent(uri.slice(7));
+  return uri;
+}
+
+function lspCompletionKindToMonaco(kind) {
+  const map = {
+    1: 18, 2: 0, 3: 1, 4: 4, 5: 3, 6: 4, 7: 5, 8: 7, 9: 8,
+    10: 9, 11: 12, 12: 11, 13: 15, 14: 13, 15: 14, 16: 15,
+    17: 16, 18: 17, 19: 18, 20: 16, 21: 14, 22: 6, 23: 20,
+    24: 21, 25: 22,
+  };
+  return map[kind] || 18;
+}
+
+// --- Diagnostic handling ---
+
+function handleDiagnostics(serverKey, params) {
+  if (!window.monaco) return;
+
+  const filePath = uriToFilePath(params.uri);
+  const models = monaco.editor.getModels();
+  const model = models.find(m => m.uri.path === filePath);
+
+  if (!model) {
+    console.log(`[LSP-bridge] diagnostics: no model for ${filePath}`);
+    return;
+  }
+
+  const markers = (params.diagnostics || []).map(d => ({
+    severity: lspSeverityToMonaco(d.severity),
+    message: d.message,
+    startLineNumber: d.range.start.line + 1,
+    startColumn: d.range.start.character + 1,
+    endLineNumber: d.range.end.line + 1,
+    endColumn: d.range.end.character + 1,
+    source: d.source || serverKey,
+  }));
+
+  console.log(`[LSP-bridge] setting ${markers.length} markers for ${serverKey} on ${filePath}`);
+  monaco.editor.setModelMarkers(model, serverKey, markers);
+}
+
+// --- Provider registration ---
+
+function registerLspProviders(serverId, serverKey, languageId) {
+  console.log(`[LSP-bridge] registerLspProviders: serverId=${serverId} serverKey=${serverKey} lang=${languageId}`);
+  if (!window.monaco) {
+    console.warn(`[LSP-bridge] registerLspProviders: monaco not loaded yet, skipping`);
+    return [];
+  }
+  const providers = [];
+
+  // Completion provider
+  const completionDisposable = monaco.languages.registerCompletionItemProvider(languageId, {
+    triggerCharacters: ['.', '('],
+    provideCompletionItems: async (model, position) => {
+      console.log(`[LSP-bridge] completion request to ${serverKey} at line ${position.lineNumber}`);
+      try {
+        const response = await window.electronAPI.lspSendRequest(serverId, 'textDocument/completion', {
+          textDocument: { uri: model.uri.toString() },
+          position: monacoPositionToLsp(position),
+        });
+
+        if (!response || response.error) {
+          console.log(`[LSP-bridge] completion error from ${serverKey}:`, response?.error);
+          return { suggestions: [] };
+        }
+
+        const items = response.result
+          ? (Array.isArray(response.result) ? response.result : response.result.items || [])
+          : [];
+
+        console.log(`[LSP-bridge] completion: got ${items.length} items from ${serverKey}`);
+
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endLineNumber: position.lineNumber,
+          endColumn: word.endColumn,
+        };
+
+        const suggestions = items.map(item => ({
+          label: item.label,
+          kind: lspCompletionKindToMonaco(item.kind),
+          insertText: item.insertText || item.label,
+          detail: item.detail || '',
+          documentation: item.documentation
+            ? (typeof item.documentation === 'string' ? item.documentation : item.documentation.value)
+            : '',
+          range,
+          sortText: item.sortText || item.label,
+        }));
+
+        return { suggestions };
+      } catch (e) {
+        console.warn(`[LSP-bridge] completion exception from ${serverKey}:`, e);
+        return { suggestions: [] };
+      }
+    },
+  });
+  providers.push(completionDisposable);
+
+  // Hover provider
+  const hoverDisposable = monaco.languages.registerHoverProvider(languageId, {
+    provideHover: async (model, position) => {
+      try {
+        const response = await window.electronAPI.lspSendRequest(serverId, 'textDocument/hover', {
+          textDocument: { uri: model.uri.toString() },
+          position: monacoPositionToLsp(position),
+        });
+
+        if (!response || response.error || !response.result) return null;
+
+        const hover = response.result;
+        const contents = [];
+
+        if (typeof hover.contents === 'string') {
+          contents.push({ value: hover.contents });
+        } else if (hover.contents.kind) {
+          contents.push({ value: hover.contents.value });
+        } else if (Array.isArray(hover.contents)) {
+          for (const c of hover.contents) {
+            contents.push({ value: typeof c === 'string' ? c : (c.value || '') });
+          }
+        } else if (hover.contents.value) {
+          contents.push({ value: hover.contents.value });
+        }
+
+        return {
+          contents,
+          range: hover.range ? lspRangeToMonaco(hover.range) : undefined,
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+  providers.push(hoverDisposable);
+
+  return providers;
+}
+
+// --- Document sync helpers ---
+
+function lspDidOpen(serverId, filePath, languageId, content) {
+  const uri = filePathToUri(filePath);
+  console.log(`[LSP-bridge] didOpen: serverId=${serverId} uri=${uri}`);
+  window.electronAPI.lspSendNotification(serverId, 'textDocument/didOpen', {
+    textDocument: {
+      uri,
+      languageId,
+      version: 1,
+      text: content,
+    },
+  });
+}
+
+function lspDidChange(serverId, filePath, content, version) {
+  const key = `${serverId}:${filePath}`;
+  clearTimeout(didChangeTimers.get(key));
+
+  didChangeTimers.set(key, setTimeout(() => {
+    didChangeTimers.delete(key);
+    const uri = filePathToUri(filePath);
+    window.electronAPI.lspSendNotification(serverId, 'textDocument/didChange', {
+      textDocument: {
+        uri,
+        version: version || 1,
+      },
+      contentChanges: [{ text: content }],
+    });
+  }, DIDCHANGE_DEBOUNCE_MS));
+}
+
+function lspDidClose(serverId, filePath) {
+  const key = `${serverId}:${filePath}`;
+  clearTimeout(didChangeTimers.get(key));
+  didChangeTimers.delete(key);
+
+  const uri = filePathToUri(filePath);
+  console.log(`[LSP-bridge] didClose: serverId=${serverId} uri=${uri}`);
+  window.electronAPI.lspSendNotification(serverId, 'textDocument/didClose', {
+    textDocument: { uri },
+  });
+}
+
+// --- Connection management ---
+
+function connectLspServer(serverId, serverKey, languageId) {
+  if (activeLspConnections.has(serverId)) return;
+  console.log(`[LSP-bridge] connectLspServer: serverId=${serverId} serverKey=${serverKey} lang=${languageId}`);
+
+  const cleanup = window.electronAPI.onLspNotification(serverId, (msg) => {
+    if (msg.method === 'textDocument/publishDiagnostics') {
+      handleDiagnostics(serverKey, msg.params);
+    } else if (msg.method === 'lsp/serverExited') {
+      console.log(`[LSP-bridge] server exited: ${serverId}`, msg.params);
+    }
+  });
+
+  const providers = registerLspProviders(serverId, serverKey, languageId);
+  activeLspConnections.set(serverId, { cleanup, providers });
+}
+
+function disconnectLspServer(serverId, serverKey) {
+  const conn = activeLspConnections.get(serverId);
+  if (!conn) return;
+  console.log(`[LSP-bridge] disconnectLspServer: serverId=${serverId} serverKey=${serverKey}`);
+
+  if (conn.cleanup) conn.cleanup();
+  for (const p of conn.providers) {
+    try { p.dispose(); } catch (_) {}
+  }
+  activeLspConnections.delete(serverId);
+
+  if (window.monaco) {
+    for (const model of monaco.editor.getModels()) {
+      monaco.editor.setModelMarkers(model, serverKey, []);
+    }
+  }
+}
+
+function disconnectAllLsp() {
+  for (const [serverId] of activeLspConnections) {
+    const conn = activeLspConnections.get(serverId);
+    if (conn.cleanup) conn.cleanup();
+    for (const p of conn.providers) {
+      try { p.dispose(); } catch (_) {}
+    }
+  }
+  activeLspConnections.clear();
+}

@@ -120,9 +120,15 @@ function renderFilePanel(panel, container) {
   saveBtn.textContent = 'Save';
   saveBtn.disabled = true;
 
+  const lspBtn = document.createElement('button');
+  lspBtn.className = 'editor-lsp-btn';
+  lspBtn.textContent = 'LSP';
+  lspBtn.title = 'Language Server Settings';
+
   toolbar.appendChild(fileLabel);
   toolbar.appendChild(modifiedDot);
   toolbar.appendChild(saveBtn);
+  toolbar.appendChild(lspBtn);
   editorArea.appendChild(toolbar);
 
   const editorContainer = document.createElement('div');
@@ -145,6 +151,8 @@ function renderFilePanel(panel, container) {
   let currentFilePath = null;
   let isDirty = false;
   let activeTreeItem = null;
+  let docVersion = 0;
+  const panelLspServerIds = []; // track server IDs started for this panel
 
   function setDirty(dirty) {
     isDirty = dirty;
@@ -201,12 +209,25 @@ function renderFilePanel(panel, container) {
     fileLabel.textContent = filePath.split('/').pop();
     fileLabel.title = filePath;
 
+    const lang = getLanguageFromPath(filePath);
+    docVersion++;
+
     if (!currentEditor) {
       await loadMonaco();
       placeholder.style.display = 'none';
+
+      // Use URI-based model so LSP diagnostics match by URI
+      const uri = monaco.Uri.file(filePath);
+      let model = monaco.editor.getModel(uri);
+      if (model) {
+        model.setValue(result.content);
+        monaco.editor.setModelLanguage(model, lang);
+      } else {
+        model = monaco.editor.createModel(result.content, lang, uri);
+      }
+
       currentEditor = monaco.editor.create(editorContainer, {
-        value: result.content,
-        language: getLanguageFromPath(filePath),
+        model,
         theme: 'vs-dark',
         automaticLayout: false,
         minimap: { enabled: false },
@@ -218,6 +239,11 @@ function renderFilePanel(panel, container) {
 
       currentEditor.onDidChangeModelContent(() => {
         setDirty(true);
+        // Send didChange to all active LSP servers
+        docVersion++;
+        for (const sid of panelLspServerIds) {
+          lspDidChange(sid, currentFilePath, currentEditor.getValue(), docVersion);
+        }
       });
 
       currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -227,6 +253,12 @@ function renderFilePanel(panel, container) {
       activeEditors.set(panel.id, {
         editor: currentEditor,
         dispose: () => {
+          // Close current doc in LSP servers
+          if (currentFilePath) {
+            for (const sid of panelLspServerIds) {
+              lspDidClose(sid, currentFilePath);
+            }
+          }
           currentEditor.dispose();
           activeEditors.delete(panel.id);
         },
@@ -234,11 +266,29 @@ function renderFilePanel(panel, container) {
 
       requestAnimationFrame(() => currentEditor.layout());
     } else {
-      const lang = getLanguageFromPath(filePath);
-      const model = currentEditor.getModel();
-      monaco.editor.setModelLanguage(model, lang);
-      currentEditor.setValue(result.content);
+      // Close old file in LSP servers
+      if (currentFilePath && currentFilePath !== filePath) {
+        for (const sid of panelLspServerIds) {
+          lspDidClose(sid, currentFilePath);
+        }
+      }
+
+      // Switch to URI-based model
+      const uri = monaco.Uri.file(filePath);
+      let model = monaco.editor.getModel(uri);
+      if (model) {
+        model.setValue(result.content);
+        monaco.editor.setModelLanguage(model, lang);
+      } else {
+        model = monaco.editor.createModel(result.content, lang, uri);
+      }
+      currentEditor.setModel(model);
       currentEditor.updateOptions({ readOnly: false });
+    }
+
+    // Notify LSP servers of file open
+    for (const sid of panelLspServerIds) {
+      lspDidOpen(sid, filePath, lang, result.content);
     }
 
     setDirty(false);
@@ -311,6 +361,165 @@ function renderFilePanel(panel, container) {
       loadTreeEntries(panel.rootDir, treeContainer, 0);
     }
   });
+
+  // LSP button handler
+  function updateLspButton() {
+    const count = panelLspServerIds.length;
+    lspBtn.textContent = count > 0 ? `LSP (${count})` : 'LSP';
+    lspBtn.classList.toggle('lsp-active', count > 0);
+  }
+
+  async function applyLspConfig(newConfig) {
+    const group = getActiveGroup();
+    if (!group) return;
+    group.lspServers = newConfig;
+    saveState();
+
+    const activeServers = await window.electronAPI.lspGetActiveServers(group.id);
+    const activeKeys = new Set(activeServers.map(s => s.serverKey));
+    const activeById = {};
+    for (const s of activeServers) {
+      activeById[s.serverKey] = s.serverId;
+    }
+
+    // Stop servers that are no longer enabled
+    for (const conf of newConfig) {
+      if (!conf.enabled && activeKeys.has(conf.serverKey)) {
+        const sid = activeById[conf.serverKey];
+        console.log(`[file-panel] stopping LSP server: ${conf.serverKey} (${sid})`);
+        disconnectLspServer(sid, conf.serverKey);
+        await window.electronAPI.lspStopServer(sid);
+        const idx = panelLspServerIds.indexOf(sid);
+        if (idx !== -1) panelLspServerIds.splice(idx, 1);
+        activeLspServers.delete(sid);
+
+        if (window.monaco) {
+          for (const model of monaco.editor.getModels()) {
+            monaco.editor.setModelMarkers(model, conf.serverKey, []);
+          }
+        }
+      }
+    }
+
+    // Start servers that are newly enabled
+    const errors = [];
+    for (const conf of newConfig) {
+      if (conf.enabled && !activeKeys.has(conf.serverKey)) {
+        console.log(`[file-panel] starting LSP server: ${conf.serverKey}`);
+        const result = await window.electronAPI.lspStartServer({
+          groupId: group.id,
+          rootDir: panel.rootDir,
+          serverKey: conf.serverKey,
+        });
+        if (result.error) {
+          console.warn(`[file-panel] LSP start failed for ${conf.serverKey}: ${result.error}`);
+          errors.push(`${conf.serverKey}: ${result.error}`);
+          continue;
+        }
+        if (result.serverId) {
+          console.log(`[file-panel] LSP server started: ${conf.serverKey} -> ${result.serverId}`);
+          panelLspServerIds.push(result.serverId);
+          activeLspServers.set(result.serverId, {
+            groupId: group.id,
+            serverKey: conf.serverKey,
+          });
+          const registry = await window.electronAPI.lspGetRegistry();
+          const langs = registry[conf.serverKey]?.languages || ['python'];
+          for (const lang of langs) {
+            connectLspServer(result.serverId, conf.serverKey, lang);
+          }
+          if (currentFilePath && currentEditor) {
+            const fileLang = getLanguageFromPath(currentFilePath);
+            lspDidOpen(result.serverId, currentFilePath, fileLang, currentEditor.getValue());
+          }
+        }
+      }
+    }
+
+    updateLspButton();
+
+    if (errors.length > 0) {
+      lspBtn.title = 'LSP errors:\n' + errors.join('\n');
+      lspBtn.classList.add('lsp-error');
+    } else {
+      lspBtn.classList.remove('lsp-error');
+      lspBtn.title = 'Language Server Settings';
+    }
+  }
+
+  lspBtn.addEventListener('click', () => {
+    const group = getActiveGroup();
+    if (!group) return;
+    showLspSettingsModal(group, panel.rootDir, applyLspConfig);
+  });
+
+  // Auto-start LSP servers if previously enabled
+  async function autoStartLsp() {
+    const group = getActiveGroup();
+    if (!group || !panel.rootDir) return;
+    const lspConfig = group.lspServers || [];
+    const enabled = lspConfig.filter(s => s.enabled);
+    if (enabled.length === 0) return;
+
+    console.log(`[file-panel] autoStartLsp: starting ${enabled.length} server(s)`);
+
+    // Ensure Monaco is loaded before registering providers
+    await loadMonaco();
+
+    const registry = await window.electronAPI.lspGetRegistry();
+    const errors = [];
+
+    for (const conf of enabled) {
+      try {
+        console.log(`[file-panel] autoStartLsp: starting ${conf.serverKey}`);
+        const result = await window.electronAPI.lspStartServer({
+          groupId: group.id,
+          rootDir: panel.rootDir,
+          serverKey: conf.serverKey,
+        });
+        if (result.error) {
+          console.warn(`[file-panel] autoStartLsp: ${conf.serverKey} failed: ${result.error}`);
+          errors.push(`${conf.serverKey}: ${result.error}`);
+          continue;
+        }
+        if (result.serverId) {
+          console.log(`[file-panel] autoStartLsp: ${conf.serverKey} -> ${result.serverId}`);
+          panelLspServerIds.push(result.serverId);
+          activeLspServers.set(result.serverId, {
+            groupId: group.id,
+            serverKey: conf.serverKey,
+          });
+          const langs = registry[conf.serverKey]?.languages || ['python'];
+          for (const lang of langs) {
+            connectLspServer(result.serverId, conf.serverKey, lang);
+          }
+          // Send didOpen for already-open file (openFile ran before servers were ready)
+          if (currentFilePath && currentEditor) {
+            const fileLang = getLanguageFromPath(currentFilePath);
+            console.log(`[file-panel] autoStartLsp: sending didOpen for ${currentFilePath} to ${result.serverId}`);
+            lspDidOpen(result.serverId, currentFilePath, fileLang, currentEditor.getValue());
+          }
+        }
+      } catch (e) {
+        console.error(`[file-panel] autoStartLsp: ${conf.serverKey} exception:`, e);
+        errors.push(`${conf.serverKey}: ${e.message}`);
+      }
+    }
+
+    updateLspButton();
+
+    if (errors.length > 0) {
+      lspBtn.title = 'LSP errors:\n' + errors.join('\n');
+      lspBtn.classList.add('lsp-error');
+      // Show green if at least some servers started successfully
+      if (panelLspServerIds.length > 0) {
+        lspBtn.classList.remove('lsp-error');
+        lspBtn.title = `${panelLspServerIds.length} server(s) running\nErrors:\n` + errors.join('\n');
+      }
+    }
+  }
+
+  autoStartLsp();
 
   // Internal sidebar resize
   let sidebarWidth = 220;
