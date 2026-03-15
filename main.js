@@ -14,6 +14,8 @@ process.on('unhandledRejection', (reason) => {
   debugLog('Unhandled rejection:', String(reason), reason?.stack || '');
 });
 
+const lspManager = require('./lsp-manager');
+
 let pty;
 try {
   pty = require('node-pty');
@@ -52,6 +54,7 @@ function createWindow() {
   });
 
   win.on('close', () => {
+    lspManager.stopAllServers();
     for (const [id, term] of terminals) {
       try { term.kill(); } catch (e) {}
     }
@@ -202,6 +205,37 @@ ipcMain.handle('debug:getCookieCount', async () => {
   };
 });
 
+// LSP IPC handlers
+ipcMain.handle('lsp:getRegistry', () => {
+  return lspManager.getServerRegistry();
+});
+
+ipcMain.handle('lsp:startServer', (event, { groupId, rootDir, serverKey }) => {
+  return lspManager.startServer(event.sender, { groupId, rootDir, serverKey });
+});
+
+ipcMain.handle('lsp:stopServer', (_, { serverId }) => {
+  lspManager.stopServer(serverId);
+  return { success: true };
+});
+
+ipcMain.handle('lsp:getActiveServers', (_, { groupId }) => {
+  return lspManager.getActiveServers(groupId);
+});
+
+ipcMain.handle('lsp:sendRequest', async (_, { serverId, method, params }) => {
+  try {
+    return await lspManager.sendRequest(serverId, method, params);
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('lsp:sendNotification', (_, { serverId, method, params }) => {
+  lspManager.sendNotification(serverId, method, params);
+  return { success: true };
+});
+
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
@@ -303,6 +337,7 @@ app.on('window-all-closed', () => {
   debugLog('[window-all-closed] saving cookies and cleaning up');
   clearInterval(cookieSaveInterval);
   saveSessionCookies();
+  lspManager.stopAllServers();
   for (const [, term] of terminals) {
     try { term.kill(); } catch (e) {}
   }

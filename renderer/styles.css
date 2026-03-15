@@ -655,7 +655,8 @@ webview {
   opacity: 1;
 }
 
-.editor-save-btn {
+.editor-save-btn,
+.editor-lsp-btn {
   background: none;
   border: 1px solid #334;
   color: #889;
@@ -667,7 +668,13 @@ webview {
   flex-shrink: 0;
 }
 
-.editor-save-btn:hover:not(:disabled) {
+.editor-lsp-btn.lsp-active {
+  border-color: #50fa7b;
+  color: #50fa7b;
+}
+
+.editor-save-btn:hover:not(:disabled),
+.editor-lsp-btn:hover {
   background: #2a2a4e;
   color: #e0e0e0;
   border-color: #533483;
@@ -987,4 +994,88 @@ webview {
   background: #4d3b8e;
   border-color: #7355a8;
   color: #fff;
+}
+
+/* ── LSP settings modal ─────────────────────────── */
+
+.lsp-server-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #16213e;
+  border: 1px solid #1a3a6e;
+  border-radius: 6px;
+}
+
+.lsp-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #556;
+  flex-shrink: 0;
+}
+
+.lsp-status-dot.running {
+  background: #50fa7b;
+}
+
+.lsp-status-dot.error {
+  background: #ff5555;
+}
+
+.lsp-server-name {
+  font-size: 13px;
+  color: #ccc;
+  font-weight: 500;
+  flex: 1;
+}
+
+.lsp-server-lang {
+  font-size: 11px;
+  color: #667;
+}
+
+.lsp-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.lsp-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.lsp-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #334;
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+
+.lsp-toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  bottom: 3px;
+  background: #889;
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.lsp-toggle input:checked + .lsp-toggle-slider {
+  background: #3d6b3d;
+}
+
+.lsp-toggle input:checked + .lsp-toggle-slider::before {
+  transform: translateX(16px);
+  background: #50fa7b;
 }

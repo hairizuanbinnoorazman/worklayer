@@ -28,4 +28,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDirectory: (dirPath) => ipcRenderer.invoke('fs:readDirectory', { dirPath }),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', { filePath, content }),
+
+  // LSP
+  lspGetRegistry: () => ipcRenderer.invoke('lsp:getRegistry'),
+  lspStartServer: (opts) => ipcRenderer.invoke('lsp:startServer', opts),
+  lspStopServer: (serverId) => ipcRenderer.invoke('lsp:stopServer', { serverId }),
+  lspGetActiveServers: (groupId) => ipcRenderer.invoke('lsp:getActiveServers', { groupId }),
+  lspSendRequest: (serverId, method, params) => ipcRenderer.invoke('lsp:sendRequest', { serverId, method, params }),
+  lspSendNotification: (serverId, method, params) => ipcRenderer.invoke('lsp:sendNotification', { serverId, method, params }),
+
+  onLspNotification: (serverId, callback) => {
+    const channel = `lsp:notification:${serverId}`;
+    const listener = (_, msg) => callback(msg);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
 });
