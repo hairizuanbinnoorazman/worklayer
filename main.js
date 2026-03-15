@@ -1,7 +1,18 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+
+const DEBUG_LOG = '/tmp/worklayer-debug.log';
+function debugLog(...args) {
+  const msg = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  try { fs.appendFileSync(DEBUG_LOG, msg); } catch (_) {}
+}
+debugLog('=== main.js loaded ===');
+
+process.on('unhandledRejection', (reason) => {
+  debugLog('Unhandled rejection:', String(reason), reason?.stack || '');
+});
 
 let pty;
 try {
@@ -11,8 +22,22 @@ try {
 }
 
 let STATE_FILE;
+let cookieBackupFile;
+let cookieSaveInterval;
 const terminals = new Map();
 let termIdCounter = 0;
+
+function saveSessionCookies() {
+  if (!cookieBackupFile) return;
+  const ses = session.fromPartition('persist:webpanels');
+  ses.cookies.get({}).then(allCookies => {
+    const sessionCookies = allCookies.filter(c => !c.expirationDate);
+    fs.writeFileSync(cookieBackupFile, JSON.stringify(sessionCookies, null, 2));
+    debugLog('[CookieSave] Saved', sessionCookies.length, 'session cookies (of', allCookies.length, 'total)');
+  }).catch(e => {
+    debugLog('[CookieSave] Failed:', e.message);
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -148,14 +173,125 @@ ipcMain.handle('fs:writeFile', (_, { filePath, content }) => {
   }
 });
 
+// Debug cookie inspection for persist:webpanels partition
+ipcMain.handle('debug:getCookies', async (_, { url }) => {
+  const ses = session.fromPartition('persist:webpanels');
+  const cookies = await ses.cookies.get({ url });
+  return cookies;
+});
+
+ipcMain.handle('debug:getCookieCount', async () => {
+  const ses = session.fromPartition('persist:webpanels');
+  const cookies = await ses.cookies.get({});
+  const sessionCookies = cookies.filter(c => !c.expirationDate);
+  return {
+    total: cookies.length,
+    session: sessionCookies.length,
+    persistent: cookies.length - sessionCookies.length,
+  };
+});
+
 app.disableHardwareAcceleration();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  debugLog('whenReady callback entered');
   STATE_FILE = path.join(app.getPath('userData'), 'worklayer-state.json');
+  cookieBackupFile = path.join(app.getPath('userData'), 'session-cookies.json');
+  debugLog('userData path:', app.getPath('userData'));
+  debugLog('cookieBackupFile:', cookieBackupFile);
+
+  const ses = session.fromPartition('persist:webpanels');
+
+  // One-time migration: clear stale persistent cookies created by the old
+  // cookies.on('changed') fix that converted session cookies to persistent ones.
+  const migrationFlag = path.join(app.getPath('userData'), '.cookie-migration-v2-done');
+  if (!fs.existsSync(migrationFlag)) {
+    debugLog('[Migration] Clearing stale persistent cookies from old fix');
+    try {
+      const allCookies = await ses.cookies.get({});
+      const stalePersistent = allCookies.filter(c => c.expirationDate);
+      for (const cookie of stalePersistent) {
+        const protocol = cookie.secure ? 'https' : 'http';
+        const domain = cookie.domain.startsWith('.')
+          ? cookie.domain.substring(1) : cookie.domain;
+        const url = `${protocol}://${domain}${cookie.path || '/'}`;
+        await ses.cookies.remove(url, cookie.name);
+      }
+      debugLog('[Migration] Removed', stalePersistent.length, 'stale persistent cookies');
+      fs.writeFileSync(migrationFlag, new Date().toISOString());
+    } catch (e) {
+      debugLog('[Migration] Error:', e.message, e.stack);
+    }
+  }
+
+  // Restore session cookies from previous shutdown
+  try {
+    const backupExists = fs.existsSync(cookieBackupFile);
+    debugLog('Cookie backup file exists:', backupExists);
+    if (backupExists) {
+      const raw = fs.readFileSync(cookieBackupFile, 'utf-8');
+      debugLog('Cookie backup file size:', raw.length, 'bytes');
+      const backed = JSON.parse(raw);
+      debugLog('Parsed', backed.length, 'cookies from backup');
+      let restored = 0;
+      let failed = 0;
+      for (const cookie of backed) {
+        const protocol = cookie.secure ? 'https' : 'http';
+        const domain = cookie.domain.startsWith('.')
+          ? cookie.domain.substring(1) : cookie.domain;
+        const url = `${protocol}://${domain}${cookie.path || '/'}`;
+        try {
+          await ses.cookies.set({
+            url,
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path || '/',
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            sameSite: cookie.sameSite || 'unspecified',
+          });
+          restored++;
+        } catch (e) {
+          failed++;
+          debugLog('[CookieRestore] FAIL:', cookie.name, '@', cookie.domain, '-', e.message);
+        }
+      }
+      debugLog('[CookieRestore] Done. Restored:', restored, 'Failed:', failed);
+    }
+  } catch (e) {
+    debugLog('[CookieRestore] Fatal error:', e.message, e.stack);
+  }
+
+  // Log webview render process crashes
+  app.on('web-contents-created', (_, contents) => {
+    debugLog('[web-contents-created] type:', contents.getType());
+    contents.on('render-process-gone', (event, details) => {
+      debugLog('[render-process-gone] reason:', details.reason, 'exitCode:', details.exitCode);
+    });
+    contents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      debugLog('[did-fail-load] code:', errorCode, 'desc:', errorDescription, 'url:', validatedURL);
+    });
+    contents.on('console-message', (event, level, message, line, sourceId) => {
+      debugLog('[webcontents-console]', `level:${level}`, message);
+    });
+  });
+
+  debugLog('About to call createWindow()');
   createWindow();
+  debugLog('createWindow() returned');
+
+  // Periodically save session cookies to disk (every 60s)
+  cookieSaveInterval = setInterval(saveSessionCookies, 60 * 1000);
+  debugLog('Cookie save interval started (60s)');
+}).catch(err => {
+  debugLog('FATAL whenReady error:', err.message, err.stack);
 });
 
 app.on('window-all-closed', () => {
+  debugLog('[window-all-closed] saving cookies and cleaning up');
+  clearInterval(cookieSaveInterval);
+  saveSessionCookies();
   for (const [, term] of terminals) {
     try { term.kill(); } catch (e) {}
   }

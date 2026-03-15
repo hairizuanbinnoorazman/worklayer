@@ -13,6 +13,7 @@ function renderPanelStrip(scrollToEnd = true) {
   // Check for cache hit
   const cached = getCachedContainer(group.id);
   if (cached) {
+    console.log(`[PanelStrip] Cache HIT - reusing DOM for group=${group.id}`);
     cached.hidden = false;
     touchLRU(group.id);
     requestAnimationFrame(() => fitVisibleTerminals(group.id));
@@ -21,6 +22,7 @@ function renderPanelStrip(scrollToEnd = true) {
   }
 
   // Cache miss - build fresh
+  console.log(`[PanelStrip] Cache MISS - building fresh DOM for group=${group.id}`);
   const wrapper = document.createElement('div');
   wrapper.className = 'group-container';
   wrapper.dataset.groupId = group.id;
