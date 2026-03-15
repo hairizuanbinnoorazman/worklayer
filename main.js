@@ -207,31 +207,42 @@ ipcMain.handle('debug:getCookieCount', async () => {
 
 // LSP IPC handlers
 ipcMain.handle('lsp:getRegistry', () => {
+  debugLog('[IPC] lsp:getRegistry');
   return lspManager.getServerRegistry();
 });
 
-ipcMain.handle('lsp:startServer', (event, { groupId, rootDir, serverKey }) => {
-  return lspManager.startServer(event.sender, { groupId, rootDir, serverKey });
+ipcMain.handle('lsp:startServer', async (event, { groupId, rootDir, serverKey }) => {
+  debugLog(`[IPC] lsp:startServer serverKey=${serverKey} rootDir=${rootDir}`);
+  const result = await lspManager.startServer(event.sender, { groupId, rootDir, serverKey });
+  debugLog(`[IPC] lsp:startServer result:`, JSON.stringify(result));
+  return result;
 });
 
 ipcMain.handle('lsp:stopServer', (_, { serverId }) => {
+  debugLog(`[IPC] lsp:stopServer serverId=${serverId}`);
   lspManager.stopServer(serverId);
   return { success: true };
 });
 
 ipcMain.handle('lsp:getActiveServers', (_, { groupId }) => {
+  debugLog(`[IPC] lsp:getActiveServers groupId=${groupId}`);
   return lspManager.getActiveServers(groupId);
 });
 
 ipcMain.handle('lsp:sendRequest', async (_, { serverId, method, params }) => {
+  debugLog(`[IPC] lsp:sendRequest serverId=${serverId} method=${method}`);
   try {
-    return await lspManager.sendRequest(serverId, method, params);
+    const result = await lspManager.sendRequest(serverId, method, params);
+    debugLog(`[IPC] lsp:sendRequest response for ${method}: hasResult=${!!result?.result} hasError=${!!result?.error}`);
+    return result;
   } catch (e) {
+    debugLog(`[IPC] lsp:sendRequest error for ${method}: ${e.message}`);
     return { error: e.message };
   }
 });
 
 ipcMain.handle('lsp:sendNotification', (_, { serverId, method, params }) => {
+  debugLog(`[IPC] lsp:sendNotification serverId=${serverId} method=${method}`);
   lspManager.sendNotification(serverId, method, params);
   return { success: true };
 });

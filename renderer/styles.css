@@ -673,6 +673,11 @@ webview {
   color: #50fa7b;
 }
 
+.editor-lsp-btn.lsp-error {
+  border-color: #ff5555;
+  color: #ff5555;
+}
+
 .editor-save-btn:hover:not(:disabled),
 .editor-lsp-btn:hover {
   background: #2a2a4e;
