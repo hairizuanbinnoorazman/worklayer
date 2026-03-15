@@ -19,17 +19,77 @@ function renderWebPanel(panel, container) {
   refreshBtn.textContent = '↻';
   refreshBtn.title = 'Refresh';
 
+  const urlInputWrapper = document.createElement('div');
+  urlInputWrapper.className = 'url-input-wrapper';
+
   const urlInput = document.createElement('input');
   urlInput.type = 'text';
   urlInput.className = 'url-input';
   urlInput.placeholder = 'Enter URL or search...';
   urlInput.value = panel.url || '';
 
+  const dropdown = document.createElement('div');
+  dropdown.className = 'url-history-dropdown';
+
+  urlInputWrapper.appendChild(urlInput);
+  urlInputWrapper.appendChild(dropdown);
+
   urlBar.appendChild(backBtn);
   urlBar.appendChild(forwardBtn);
   urlBar.appendChild(refreshBtn);
-  urlBar.appendChild(urlInput);
+  urlBar.appendChild(urlInputWrapper);
   container.appendChild(urlBar);
+
+  let selectedIndex = -1;
+
+  function showDropdown(query) {
+    const items = getFilteredUrlHistory(query);
+    if (items.length === 0) {
+      hideDropdown();
+      return;
+    }
+    selectedIndex = -1;
+    dropdown.innerHTML = '';
+    items.forEach((entry, i) => {
+      const item = document.createElement('div');
+      item.className = 'url-history-item';
+      item.dataset.index = i;
+
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'url-history-title';
+      titleSpan.textContent = entry.title || entry.url;
+
+      const urlSpan = document.createElement('span');
+      urlSpan.className = 'url-history-url';
+      urlSpan.textContent = entry.url;
+
+      item.appendChild(titleSpan);
+      item.appendChild(urlSpan);
+
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        urlInput.value = entry.url;
+        hideDropdown();
+        navigate(urlInput.value);
+      });
+
+      dropdown.appendChild(item);
+    });
+    dropdown.classList.add('visible');
+  }
+
+  function hideDropdown() {
+    dropdown.classList.remove('visible');
+    selectedIndex = -1;
+  }
+
+  function updateSelection() {
+    const items = dropdown.querySelectorAll('.url-history-item');
+    items.forEach((el, i) => {
+      el.classList.toggle('selected', i === selectedIndex);
+      if (i === selectedIndex) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
 
   const webview = document.createElement('webview');
   webview.setAttribute('allowpopups', '');
@@ -43,7 +103,6 @@ function renderWebPanel(panel, container) {
     let url = raw.trim();
     if (!url) return;
     if (!/^[a-z][a-z\d+\-.]*:/i.test(url)) {
-      // Treat as URL if it looks like a domain, else search
       if (/^[\w-]+(\.[\w-]+)+/.test(url) && !url.includes(' ')) {
         url = 'https://' + url;
       } else {
@@ -53,14 +112,51 @@ function renderWebPanel(panel, container) {
     webview.src = url;
     urlInput.value = url;
     updatePanelUrl(panel.id, url);
+    addToUrlHistory(url, '');
   };
 
   backBtn.addEventListener('click', () => webview.goBack());
   forwardBtn.addEventListener('click', () => webview.goForward());
   refreshBtn.addEventListener('click', () => webview.reload());
 
+  urlInput.addEventListener('focus', () => {
+    showDropdown(urlInput.value);
+  });
+
+  urlInput.addEventListener('input', () => {
+    showDropdown(urlInput.value);
+  });
+
+  urlInput.addEventListener('blur', () => {
+    setTimeout(() => hideDropdown(), 150);
+  });
+
   urlInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') navigate(urlInput.value);
+    const isDropdownVisible = dropdown.classList.contains('visible');
+    const items = dropdown.querySelectorAll('.url-history-item');
+
+    if (e.key === 'ArrowDown' && isDropdownVisible && items.length > 0) {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+      updateSelection();
+    } else if (e.key === 'ArrowUp' && isDropdownVisible && items.length > 0) {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, -1);
+      updateSelection();
+    } else if (e.key === 'Enter') {
+      if (isDropdownVisible && selectedIndex >= 0 && selectedIndex < items.length) {
+        e.preventDefault();
+        const urlSpan = items[selectedIndex].querySelector('.url-history-url');
+        urlInput.value = urlSpan.textContent;
+        hideDropdown();
+        navigate(urlInput.value);
+      } else {
+        hideDropdown();
+        navigate(urlInput.value);
+      }
+    } else if (e.key === 'Escape') {
+      hideDropdown();
+    }
   });
 
   // Stop propagation so clicks in the URL bar don't lose focus unexpectedly
@@ -74,6 +170,7 @@ function renderWebPanel(panel, container) {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     urlInput.value = e.url;
     updatePanelUrl(panel.id, e.url);
+    addToUrlHistory(e.url, '');
     if (window.electronAPI.debugGetCookieCount) {
       window.electronAPI.debugGetCookieCount().then(info => {
         console.log(`[WebPanel] Cookies after navigate: total=${info.total} session=${info.session} persistent=${info.persistent}`);
@@ -85,6 +182,7 @@ function renderWebPanel(panel, container) {
     if (e.isMainFrame) {
       urlInput.value = e.url;
       updatePanelUrl(panel.id, e.url);
+      addToUrlHistory(e.url, '');
     }
   });
 
@@ -111,6 +209,15 @@ function renderWebPanel(panel, container) {
     if (panelEl) {
       const lbl = panelEl.querySelector('.panel-type-label');
       if (lbl) lbl.textContent = e.title || 'Web';
+    }
+    // Update the title in URL history for this URL
+    const currentUrl = urlInput.value;
+    if (e.title && currentUrl) {
+      const entry = state.urlHistory.find(h => h.url === currentUrl);
+      if (entry) {
+        entry.title = e.title;
+        saveState();
+      }
     }
   });
 }

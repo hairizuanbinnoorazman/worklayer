@@ -7,8 +7,9 @@ const DEFAULT_FILE_WIDTH = 900;
 const MAX_TERMINAL_PANELS = 20;
 const MAX_WEB_PANELS = 20;
 const MAX_FILE_PANELS = 10;
+const MAX_URL_HISTORY = 100;
 
-let state = { activeGroupId: null, groups: [], templates: [] };
+let state = { activeGroupId: null, groups: [], templates: [], urlHistory: [] };
 
 // Map<panelId, { terminal, fitAddon, cleanup, termId }>
 const activeTerminals = new Map();
@@ -24,6 +25,7 @@ async function init() {
     state = saved;
     if (!state.maxCachedGroups) state.maxCachedGroups = 5;
     if (!state.templates) state.templates = [];
+    if (!state.urlHistory) state.urlHistory = [];
     if (!state.groups.find(g => g.id === state.activeGroupId)) {
       state.activeGroupId = state.groups[0].id;
     }
@@ -263,6 +265,24 @@ function updatePanelWidth(panelId, width) {
   if (!group) return;
   const panel = group.panels.find(p => p.id === panelId);
   if (panel) panel.width = Math.max(300, Math.round(width));
+}
+
+function addToUrlHistory(url, title) {
+  if (!url || url === 'about:blank' || url.startsWith('data:')) return;
+  state.urlHistory = state.urlHistory.filter(entry => entry.url !== url);
+  state.urlHistory.unshift({ url, title: title || '', timestamp: Date.now() });
+  if (state.urlHistory.length > MAX_URL_HISTORY) {
+    state.urlHistory = state.urlHistory.slice(0, MAX_URL_HISTORY);
+  }
+  saveState();
+}
+
+function getFilteredUrlHistory(query) {
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return state.urlHistory.slice(0, 10);
+  return state.urlHistory
+    .filter(entry => entry.url.toLowerCase().includes(q) || (entry.title && entry.title.toLowerCase().includes(q)))
+    .slice(0, 10);
 }
 
 document.addEventListener('DOMContentLoaded', init);

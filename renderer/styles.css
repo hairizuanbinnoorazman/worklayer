@@ -389,6 +389,73 @@ body {
 
 .url-input:focus { border-color: #533483; color: #e0e0e0; }
 
+.url-input-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+
+.url-input-wrapper .url-input {
+  flex: 1;
+}
+
+.url-history-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #1e1e2e;
+  border: 1px solid #334;
+  border-radius: 0 0 6px 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+}
+
+.url-history-dropdown.visible {
+  display: block;
+}
+
+.url-history-dropdown::-webkit-scrollbar { width: 4px; }
+.url-history-dropdown::-webkit-scrollbar-track { background: transparent; }
+.url-history-dropdown::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+.url-history-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.08s;
+  gap: 1px;
+}
+
+.url-history-item:hover,
+.url-history-item.selected {
+  background: #533483;
+}
+
+.url-history-title {
+  font-size: 12px;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url-history-url {
+  font-size: 10px;
+  color: #778;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url-history-item:hover .url-history-url,
+.url-history-item.selected .url-history-url {
+  color: #bba;
+}
+
 webview {
   flex: 1;
   width: 100%;
