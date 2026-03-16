@@ -55,6 +55,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('search:foundInPage', listener);
   },
 
+  // HTTP Basic Auth
+  onAuthLoginRequest: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('auth:login-request', listener);
+    return () => ipcRenderer.removeListener('auth:login-request', listener);
+  },
+  authLoginResponse: (requestId, username, password, cancelled) =>
+    ipcRenderer.send('auth:login-response', { requestId, username, password, cancelled }),
+
   onLspNotification: (serverId, callback) => {
     const channel = `lsp:notification:${serverId}`;
     const listener = (_, msg) => callback(msg);

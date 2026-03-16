@@ -1065,6 +1065,12 @@ webview {
   color: #fff;
 }
 
+/* ── Auth modal info ────────────────────────────── */
+
+.auth-modal-info { text-align: center; padding: 8px 0; }
+.auth-modal-host { font-size: 14px; font-weight: 600; color: #cdd6f4; }
+.auth-modal-realm { font-size: 12px; color: #889; margin-top: 4px; font-style: italic; }
+
 /* ── LSP settings modal ─────────────────────────── */
 
 .lsp-server-row {
