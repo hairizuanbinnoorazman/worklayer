@@ -93,3 +93,51 @@ After the initial search in the web panel works correctly, adding more character
 - `renderer/web-panel.js`: Simplified to only inject Cmd+F interceptor (no `__panelSearchActive` flag), added `found-in-page` event handler for match count, stores `webview._webContentsId` on dom-ready
 
 **Result:** SUCCESS - `findInPage` handles highlighting/navigation, main process intercepts keystrokes before they reach it, IPC forwards them to the search input. Page interaction works normally when search is not capturing.
+
+### 7. BUG - findInPage never updates highlights or match count for new queries
+
+**Symptom:** After take 6, keystrokes correctly build the query in the search input, but visual highlights never update and `found-in-page` events never fire for new search queries. Only Enter-based navigation fires events, but with stale match counts from an earlier query.
+
+**Diagnostic evidence (from `/tmp/worklayer-debug.log`):**
+
+The IPC-based approach (`renderer → ipcMain.handle → webContents.findInPage()`) showed:
+- `findInPage("chatb", {findNext:false})` → requestId 1, **no found-in-page event**
+- `findInPage("chatbot", {findNext:false})` → requestId 2, **no found-in-page event**
+- Enter presses → `findInPage(query, {findNext:true})` → requestIds 3-10, all fire events but with **stale match count (18)** from an earlier query
+
+Switching to direct `webview.findInPage()` DOM calls (bypassing IPC) showed the **exact same pattern** — `findNext:false` never fires events, `findNext:true` fires events but with stale queries.
+
+**Root cause:** `findInPage` with `findNext:false` (new search) is broken for webview guest webContents in Electron 28.3.3. It allocates a requestId and returns it, but never fires a `found-in-page` event and never updates the internal search query. This happens regardless of whether the call is made from:
+- The main process via `webContents.findInPage()` (IPC path)
+- The renderer via `webview.findInPage()` (direct DOM path)
+
+Both paths hit the same underlying Chromium bug for webview guests.
+
+### 8. SUCCESS - stopFindInPage + findNext:true workaround
+
+**Rationale:** From earlier diagnostic sessions, `findInPage` with `findNext:true` DOES fire `found-in-page` events and CAN accept new query text — but only after `stopFindInPage` clears the previous session. The combination of `stopFindInPage('clearSelection')` followed immediately by `findInPage(query, {findNext:true})` forces Electron to start a fresh search with the new query while using the code path that actually fires events.
+
+**Changes:**
+- `renderer/panel-search.js` → `getSearchImpl`: Replaced IPC-based `findInPage`/`stopFindInPage` calls with direct `webview.findInPage()` / `webview.stopFindInPage()` calls. For new queries, calls `stopFindInPage('clearSelection')` first then `findInPage(query, {findNext:true})`. For same-query navigation, just calls `findInPage(query, {findNext:true})`.
+- `renderer/panel-search.js` → `doFind`: Removed `setTimeout` backup focus restore hack that was a workaround for IPC timing.
+- `startCapture`/`stopCapture` remain IPC-based (these control main-process keystroke interception, unrelated to findInPage).
+
+**Key code pattern:**
+```js
+findNext(query) {
+  const isNew = query !== lastQuery;
+  lastQuery = query;
+  if (isNew) {
+    webview.stopFindInPage('clearSelection');
+  }
+  webview.findInPage(query, { forward: true, findNext: true });
+}
+```
+
+**Why it works:**
+1. `stopFindInPage('clearSelection')` tears down the current find session entirely
+2. `findInPage(query, {findNext:true})` — despite `findNext:true` semantically meaning "continue", when there's no active session (just cleared), Electron treats it as a new search
+3. This code path correctly fires `found-in-page` events with accurate match counts, unlike `findNext:false` which silently fails
+4. Direct `webview.findInPage()` calls avoid the IPC round-trip, simplifying the architecture
+
+**Result:** SUCCESS - Visual highlights update with each keystroke, match counts decrease as the query gets more specific, Enter/Shift+Enter navigate between matches, and Escape closes search.
