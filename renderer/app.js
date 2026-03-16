@@ -69,6 +69,16 @@ async function init() {
 
   renderSidebar();
   renderPanelStrip();
+
+  let windowResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(windowResizeTimer);
+    windowResizeTimer = setTimeout(() => {
+      if (state.activeGroupId) {
+        fitVisibleTerminals(state.activeGroupId);
+      }
+    }, 100);
+  });
 }
 
 function saveState() {
