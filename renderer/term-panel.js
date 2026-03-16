@@ -44,6 +44,11 @@ async function mountTerminal(panel, container) {
   await new Promise(resolve => requestAnimationFrame(resolve));
   try { fitAddon.fit(); } catch (e) {}
 
+  const resizeObserver = new ResizeObserver(() => {
+    try { fitAddon.fit(); } catch (e) {}
+  });
+  resizeObserver.observe(container);
+
   // Spawn the pty process
   const { id: termId, error } = await window.electronAPI.createTerminal({
     cols: terminal.cols,
@@ -89,6 +94,7 @@ async function mountTerminal(panel, container) {
   });
 
   const cleanup = () => {
+    resizeObserver.disconnect();
     removeDataListener();
     try { terminal.dispose(); } catch (e) {}
     window.electronAPI.killTerminal(termId);
