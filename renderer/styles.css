@@ -281,6 +281,14 @@ body {
   color: #e0e0e0;
 }
 
+.panel-search-match-info {
+  font-size: 11px;
+  color: #889;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: center;
+}
+
 .panel-search-btn {
   background: none;
   border: 1px solid #334;

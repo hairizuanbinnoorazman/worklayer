@@ -37,6 +37,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   lspSendRequest: (serverId, method, params) => ipcRenderer.invoke('lsp:sendRequest', { serverId, method, params }),
   lspSendNotification: (serverId, method, params) => ipcRenderer.invoke('lsp:sendNotification', { serverId, method, params }),
 
+  // Search keystroke capture
+  searchStartCapture: (webContentsId) => ipcRenderer.send('search:startCapture', { webContentsId }),
+  searchStopCapture: (webContentsId) => ipcRenderer.send('search:stopCapture', { webContentsId }),
+  onSearchKeystroke: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('search:keystroke', listener);
+    return () => ipcRenderer.removeListener('search:keystroke', listener);
+  },
+  searchFindInPage: (webContentsId, text, options) =>
+    ipcRenderer.invoke('search:findInPage', { webContentsId, text, options }),
+  searchStopFindInPage: (webContentsId, action) =>
+    ipcRenderer.invoke('search:stopFindInPage', { webContentsId, action }),
+  onSearchFoundInPage: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('search:foundInPage', listener);
+    return () => ipcRenderer.removeListener('search:foundInPage', listener);
+  },
+
   onLspNotification: (serverId, callback) => {
     const channel = `lsp:notification:${serverId}`;
     const listener = (_, msg) => callback(msg);

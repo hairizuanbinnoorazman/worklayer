@@ -65,8 +65,31 @@ After the initial search in the web panel works correctly, adding more character
    - Use `BrowserView` instead of `<webview>` (architectural change)
    - Replace `findInPage` entirely with a DOM-based search using CSS Custom Highlight API + TreeWalker (no focus stealing)
 
-## Not Yet Attempted
+### 5. FAILED - CSS Custom Highlight API + TreeWalker (replace findInPage entirely)
 
-- **CSS Custom Highlight API + TreeWalker**: Replace `findInPage` with injected DOM-based search inside the webview. Uses `Range` objects + `CSS.highlights` to highlight matches without stealing focus. Requires injecting search logic into the webview via `executeJavaScript` and communicating results back. Chrome 105+ / Electron 28 should support it.
-- **BrowserView approach**: Render search UI in a separate BrowserView overlay. Major architectural change.
-- **Main process `webContents.on('before-input-event')`**: Unlike the webview tag's DOM event, the main process version properly supports `preventDefault()`. Would require IPC between renderer and main process.
+**Rationale:** Since `findInPage` is the source of the focus-stealing problem, replace it entirely with a DOM-based search using the CSS Custom Highlight API (`CSS.highlights`) and `TreeWalker`. Inject search logic into the webview via `executeJavaScript`, communicate results back via `console-message`.
+
+**Changes:**
+- Removed all `findInPage` / `stopFindInPage` calls
+- Injected a `__panelSearch` object into webview with `find(query, direction)` and `clear()` methods
+- Used `TreeWalker(SHOW_TEXT)` to find text ranges, `Highlight` API to highlight them
+- Kept `__panelSearchActive` keystroke capture for redirecting keys back to search input
+
+**Result:** FAILED - Multiple issues:
+- Next/previous navigation was broken (ranges collected per-call didn't persist correctly across navigations)
+- No scroll-to-match worked reliably across different page layouts
+- The `__panelSearchActive` keystroke capture in the webview DOM blocked ALL page interaction (clicks, scrolling) while search was open
+- CSS Custom Highlight API has inconsistent support across page content (iframes, shadow DOM)
+- Overall UX was significantly worse than `findInPage`
+
+### 6. SUCCESS - Main process `before-input-event` keystroke interception
+
+**Rationale:** `findInPage()` is actually great for highlighting and navigation — the only problem is it steals keystrokes during typing. The main process `webContents.on('before-input-event')` properly supports `event.preventDefault()` (unlike the DOM-level event on the webview tag). We can intercept keystrokes BEFORE `findInPage` consumes them and forward them to the search input via IPC.
+
+**Changes:**
+- `main.js`: Added `capturingWebContents` Set, `search:startCapture` / `search:stopCapture` IPC handlers, `before-input-event` listener on webview contents that intercepts printable chars, Backspace, Enter, Escape and forwards via `search:keystroke` IPC
+- `preload.js`: Exposed `searchStartCapture`, `searchStopCapture`, `onSearchKeystroke` methods
+- `renderer/panel-search.js`: Rewrote web search impl to use `findInPage` / `stopFindInPage`, added `startCapture` / `stopCapture` that toggle main-process keystroke interception, global `onSearchKeystroke` listener that redirects keys to the active search input
+- `renderer/web-panel.js`: Simplified to only inject Cmd+F interceptor (no `__panelSearchActive` flag), added `found-in-page` event handler for match count, stores `webview._webContentsId` on dom-ready
+
+**Result:** SUCCESS - `findInPage` handles highlighting/navigation, main process intercepts keystrokes before they reach it, IPC forwards them to the search input. Page interaction works normally when search is not capturing.
