@@ -22,6 +22,28 @@ const activeLspServers = new Map();
 
 let saveDebounceTimer = null;
 
+// ── Focus tracking ───────────────────────────────
+let focusedPanelId = null;
+
+function setFocusedPanel(panelId) {
+  if (focusedPanelId === panelId) return;
+
+  // Clear previous
+  if (focusedPanelId) {
+    const prevEl = document.querySelector(`[data-panel-id="${focusedPanelId}"]`);
+    if (prevEl) prevEl.classList.remove('panel-focused');
+    hidePanelSearch(focusedPanelId);
+  }
+
+  focusedPanelId = panelId;
+
+  // Set new
+  if (panelId) {
+    const el = document.querySelector(`[data-panel-id="${panelId}"]`);
+    if (el) el.classList.add('panel-focused');
+  }
+}
+
 async function init() {
   const saved = await window.electronAPI.loadState();
   if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
@@ -151,6 +173,7 @@ function renameGroup(groupId, newLabel) {
 
 function selectGroup(groupId) {
   if (state.activeGroupId === groupId) return;
+  setFocusedPanel(null);
   state.activeGroupId = groupId;
   saveState();
   renderSidebar();
@@ -227,6 +250,9 @@ function removePanel(panelId) {
   const group = getActiveGroup();
   if (!group) return;
 
+  destroyPanelSearch(panelId);
+  if (focusedPanelId === panelId) focusedPanelId = null;
+
   if (activeTerminals.has(panelId)) {
     const { cleanup } = activeTerminals.get(panelId);
     if (cleanup) cleanup();
@@ -291,5 +317,22 @@ function getFilteredUrlHistory(query) {
     .filter(entry => entry.url.toLowerCase().includes(q) || (entry.title && entry.title.toLowerCase().includes(q)))
     .slice(0, 10);
 }
+
+// ── Global Cmd+F / Ctrl+F handler ────────────────
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    if (!focusedPanelId) return; // let browser default
+
+    // Check panel type - let Monaco handle its own find
+    const group = getActiveGroup();
+    if (group) {
+      const panel = group.panels.find(p => p.id === focusedPanelId);
+      if (panel && panel.type === 'file') return; // Monaco handles natively
+    }
+
+    e.preventDefault();
+    showPanelSearch(focusedPanelId);
+  }
+});
 
 document.addEventListener('DOMContentLoaded', init);

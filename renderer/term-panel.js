@@ -34,6 +34,10 @@ async function mountTerminal(panel, container) {
 
   const fitAddon = new FitAddon.FitAddon();
   terminal.loadAddon(fitAddon);
+
+  const searchAddon = new SearchAddon.SearchAddon();
+  terminal.loadAddon(searchAddon);
+
   terminal.open(container);
 
   // Wait for DOM layout to settle, then fit before creating the PTY
@@ -50,7 +54,7 @@ async function mountTerminal(panel, container) {
 
   if (error) {
     terminal.write(`\r\n\x1b[31mError: ${error}\x1b[0m\r\n`);
-    activeTerminals.set(panel.id, { terminal, fitAddon, cleanup: () => terminal.dispose() });
+    activeTerminals.set(panel.id, { terminal, fitAddon, searchAddon, cleanup: () => terminal.dispose() });
     return;
   }
 
@@ -81,5 +85,5 @@ async function mountTerminal(panel, container) {
     activeTerminals.delete(panel.id);
   };
 
-  activeTerminals.set(panel.id, { terminal, fitAddon, cleanup, termId });
+  activeTerminals.set(panel.id, { terminal, fitAddon, searchAddon, cleanup, termId });
 }

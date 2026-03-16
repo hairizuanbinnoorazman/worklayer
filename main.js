@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, webContents } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -15,6 +15,9 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const lspManager = require('./lsp-manager');
+
+// Track which webContents are in search keystroke capture mode
+const capturingWebContents = new Set();
 
 let pty;
 try {
@@ -247,6 +250,31 @@ ipcMain.handle('lsp:sendNotification', (_, { serverId, method, params }) => {
   return { success: true };
 });
 
+// Search keystroke capture IPC
+ipcMain.on('search:startCapture', (e, { webContentsId }) => {
+  capturingWebContents.add(webContentsId);
+  debugLog('[Search] startCapture wcId:', webContentsId);
+});
+
+ipcMain.on('search:stopCapture', (e, { webContentsId }) => {
+  capturingWebContents.delete(webContentsId);
+  debugLog('[Search] stopCapture wcId:', webContentsId);
+});
+
+ipcMain.handle('search:findInPage', (_, { webContentsId, text, options }) => {
+  const wc = webContents.fromId(webContentsId);
+  if (!wc || wc.isDestroyed()) return null;
+  const requestId = wc.findInPage(text, options);
+  debugLog('[Search] findInPage wcId:', webContentsId, 'text:', text, 'opts:', JSON.stringify(options), 'requestId:', requestId);
+  return requestId;
+});
+
+ipcMain.handle('search:stopFindInPage', (_, { webContentsId, action }) => {
+  debugLog('[Search] stopFindInPage wcId:', webContentsId, 'action:', action);
+  const wc = webContents.fromId(webContentsId);
+  if (wc && !wc.isDestroyed()) wc.stopFindInPage(action);
+});
+
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
@@ -331,6 +359,37 @@ app.whenReady().then(async () => {
     contents.on('console-message', (event, level, message, line, sourceId) => {
       debugLog('[webcontents-console]', `level:${level}`, message);
     });
+
+    // Intercept keystrokes in webview contents when search capture is active
+    if (contents.getType() === 'webview') {
+      contents.on('before-input-event', (event, input) => {
+        const wcId = contents.id;
+        if (!capturingWebContents.has(wcId)) return;
+        if (input.type !== 'keyDown') return;
+        // Allow system shortcuts through
+        if ((input.meta || input.control) && ['c', 'v', 'a', 'x', 'z'].includes(input.key.toLowerCase())) return;
+        // Skip modifier-only keys
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(input.key)) return;
+
+        const shouldIntercept = input.key.length === 1 || input.key === 'Backspace' || input.key === 'Enter' || input.key === 'Escape';
+        if (!shouldIntercept) return;
+
+        event.preventDefault();
+        const host = contents.hostWebContents;
+        if (host && !host.isDestroyed()) {
+          host.send('search:keystroke', { webContentsId: wcId, key: input.key, shift: input.shift });
+        }
+      });
+
+      contents.on('found-in-page', (event, result) => {
+        debugLog('[Search] found-in-page wcId:', contents.id, 'requestId:', result.requestId,
+          'active:', result.activeMatchOrdinal, 'matches:', result.matches, 'final:', result.finalUpdate);
+        const host = contents.hostWebContents;
+        if (host && !host.isDestroyed()) {
+          host.send('search:foundInPage', { webContentsId: contents.id, result });
+        }
+      });
+    }
   });
 
   debugLog('About to call createWindow()');

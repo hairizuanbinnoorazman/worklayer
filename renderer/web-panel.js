@@ -6,17 +6,17 @@ function renderWebPanel(panel, container) {
 
   const backBtn = document.createElement('button');
   backBtn.className = 'nav-btn';
-  backBtn.textContent = '←';
+  backBtn.textContent = '\u2190';
   backBtn.title = 'Back';
 
   const forwardBtn = document.createElement('button');
   forwardBtn.className = 'nav-btn';
-  forwardBtn.textContent = '→';
+  forwardBtn.textContent = '\u2192';
   forwardBtn.title = 'Forward';
 
   const refreshBtn = document.createElement('button');
   refreshBtn.className = 'nav-btn';
-  refreshBtn.textContent = '↻';
+  refreshBtn.textContent = '\u21bb';
   refreshBtn.title = 'Refresh';
 
   const urlInputWrapper = document.createElement('div');
@@ -162,8 +162,48 @@ function renderWebPanel(panel, container) {
   // Stop propagation so clicks in the URL bar don't lose focus unexpectedly
   urlInput.addEventListener('mousedown', e => e.stopPropagation());
 
+  // Store webContentsId once the webview is ready
   webview.addEventListener('dom-ready', () => {
     console.log(`[WebPanel] dom-ready panel=${panel.id}`);
+    webview._webContentsId = webview.getWebContentsId();
+  });
+
+  // Inject Cmd+F interceptor into webview guest page
+  const injectCmdFInterceptor = () => {
+    webview.executeJavaScript(`
+      if (!window.__panelSearchInjected) {
+        window.__panelSearchInjected = true;
+        document.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('__PANEL_SEARCH_CMD_F__');
+          }
+        }, true);
+      }
+    `).catch(() => {});
+  };
+
+  webview.addEventListener('dom-ready', injectCmdFInterceptor);
+  webview.addEventListener('did-navigate', injectCmdFInterceptor);
+
+  // Handle Cmd+F from webview
+  webview.addEventListener('console-message', e => {
+    if (e.message === '__PANEL_SEARCH_CMD_F__') {
+      setFocusedPanel(panel.id);
+      showPanelSearch(panel.id);
+    }
+  });
+
+  // Handle found-in-page results from findInPage
+  webview.addEventListener('found-in-page', e => {
+    console.log('[WebPanel] found-in-page (webview event) panel:', panel.id,
+      'requestId:', e.result.requestId, 'active:', e.result.activeMatchOrdinal,
+      'matches:', e.result.matches, 'final:', e.result.finalUpdate);
+    const entry = activePanelSearches.get(panel.id);
+    if (entry && entry.updateMatchInfo) {
+      entry.updateMatchInfo(e.result.activeMatchOrdinal || 0, e.result.matches || 0);
+    }
   });
 
   webview.addEventListener('did-navigate', e => {
@@ -193,7 +233,7 @@ function renderWebPanel(panel, container) {
       <html>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
         <div style="text-align: center; max-width: 480px; padding: 2rem;">
-          <div style="font-size: 3rem; margin-bottom: 1rem;">⚠</div>
+          <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
           <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
           <p style="color: #a6adc8; margin: 0 0 1rem;">${e.validatedURL || ''}</p>
           <p style="color: #f38ba8;">${e.errorDescription || 'Unknown error'} (${e.errorCode})</p>
@@ -201,6 +241,21 @@ function renderWebPanel(panel, container) {
       </body>
       </html>`;
     webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+  });
+
+  // Focus tracking when webview gains focus; stop search capture so keystrokes go to webview
+  // BUT keep capture alive if the search bar is currently visible/active
+  webview.addEventListener('focus', () => {
+    setFocusedPanel(panel.id);
+    const entry = activePanelSearches.get(panel.id);
+    if (entry && !entry.bar.hidden) {
+      console.log('[WebPanel] focus event — search bar active, refocusing search input');
+      entry.input.focus(); // Immediately reclaim focus for the search input
+      return;
+    }
+    if (entry && entry.searchImpl.stopCapture) {
+      entry.searchImpl.stopCapture();
+    }
   });
 
   webview.addEventListener('page-title-updated', e => {

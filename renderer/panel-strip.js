@@ -1,5 +1,17 @@
 // panel-strip.js - Panel strip and resize handles with group DOM caching
 
+// Clear focus when clicking empty area of the panel strip
+document.addEventListener('DOMContentLoaded', () => {
+  const strip = document.getElementById('panel-strip');
+  if (strip) {
+    strip.addEventListener('mousedown', e => {
+      if (!e.target.closest('.panel')) {
+        setFocusedPanel(null);
+      }
+    });
+  }
+});
+
 function renderPanelStrip(scrollToEnd = true) {
   const strip = document.getElementById('panel-strip');
   const group = getActiveGroup();
@@ -136,6 +148,14 @@ function createPanelElement(panel) {
   }
 
   el.appendChild(content);
+
+  // Focus tracking: clicking a panel focuses it
+  el.addEventListener('mousedown', e => {
+    // Don't steal focus when clicking close button
+    if (e.target.closest('.panel-close-btn')) return;
+    setFocusedPanel(panel.id);
+  });
+
   initPanelDrag(el);
   return el;
 }
