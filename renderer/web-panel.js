@@ -40,6 +40,10 @@ function renderWebPanel(panel, container) {
   urlBar.appendChild(urlInputWrapper);
   container.appendChild(urlBar);
 
+  const loadingBar = document.createElement('div');
+  loadingBar.className = 'webview-loading-bar';
+  container.appendChild(loadingBar);
+
   let selectedIndex = -1;
 
   function showDropdown(query) {
@@ -256,6 +260,14 @@ function renderWebPanel(panel, container) {
     if (entry && entry.searchImpl.stopCapture) {
       entry.searchImpl.stopCapture();
     }
+  });
+
+  webview.addEventListener('did-start-loading', () => {
+    loadingBar.classList.add('active');
+  });
+
+  webview.addEventListener('did-stop-loading', () => {
+    loadingBar.classList.remove('active');
   });
 
   webview.addEventListener('page-title-updated', e => {

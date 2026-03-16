@@ -19,6 +19,10 @@ const lspManager = require('./lsp-manager');
 // Track which webContents are in search keystroke capture mode
 const capturingWebContents = new Set();
 
+// HTTP Basic Auth request tracking
+let authRequestIdCounter = 0;
+const pendingAuthCallbacks = new Map();
+
 let pty;
 try {
   pty = require('node-pty');
@@ -275,6 +279,15 @@ ipcMain.handle('search:stopFindInPage', (_, { webContentsId, action }) => {
   if (wc && !wc.isDestroyed()) wc.stopFindInPage(action);
 });
 
+// HTTP Basic Auth IPC
+ipcMain.on('auth:login-response', (_, { requestId, username, password, cancelled }) => {
+  const callback = pendingAuthCallbacks.get(requestId);
+  pendingAuthCallbacks.delete(requestId);
+  if (!callback) return;
+  if (cancelled) callback();
+  else callback(username, password);
+});
+
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
@@ -387,6 +400,25 @@ app.whenReady().then(async () => {
         const host = contents.hostWebContents;
         if (host && !host.isDestroyed()) {
           host.send('search:foundInPage', { webContentsId: contents.id, result });
+        }
+      });
+
+      contents.on('login', (event, authenticationResponseDetails, authInfo, callback) => {
+        event.preventDefault();
+        const requestId = ++authRequestIdCounter;
+        pendingAuthCallbacks.set(requestId, callback);
+        const host = contents.hostWebContents;
+        if (host && !host.isDestroyed()) {
+          host.send('auth:login-request', {
+            requestId, webContentsId: contents.id,
+            url: authenticationResponseDetails.url,
+            host: authInfo.host, port: authInfo.port,
+            realm: authInfo.realm, scheme: authInfo.scheme,
+            isProxy: authInfo.isProxy,
+          });
+        } else {
+          pendingAuthCallbacks.delete(requestId);
+          callback();
         }
       });
     }

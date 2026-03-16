@@ -520,6 +520,25 @@ body {
   color: #bba;
 }
 
+.webview-loading-bar {
+  height: 2px;
+  width: 100%;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent 0%, #533483 40%, #533483 60%, transparent 100%);
+  background-size: 200% 100%;
+  flex-shrink: 0;
+}
+
+.webview-loading-bar.active {
+  opacity: 1;
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-slide {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
 webview {
   flex: 1;
   width: 100%;
@@ -1064,6 +1083,12 @@ webview {
   border-color: #7355a8;
   color: #fff;
 }
+
+/* ── Auth modal info ────────────────────────────── */
+
+.auth-modal-info { text-align: center; padding: 8px 0; }
+.auth-modal-host { font-size: 14px; font-weight: 600; color: #cdd6f4; }
+.auth-modal-realm { font-size: 12px; color: #889; margin-top: 4px; font-style: italic; }
 
 /* ── LSP settings modal ─────────────────────────── */
 
