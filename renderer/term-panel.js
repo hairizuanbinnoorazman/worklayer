@@ -68,6 +68,16 @@ async function mountTerminal(panel, container) {
     activeTerminals.delete(panel.id);
   });
 
+  // Shift+Enter: insert a newline without executing the command
+  terminal.attachCustomKeyEventHandler(ev => {
+    if (ev.type === 'keydown' && ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+      ev.preventDefault();
+      window.electronAPI.writeTerminal(termId, '\x16\n');
+      return false;
+    }
+    return true;
+  });
+
   // xterm -> pty
   terminal.onData(data => {
     window.electronAPI.writeTerminal(termId, data);
