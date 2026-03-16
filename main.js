@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, session, webContents } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, session, webContents, Menu, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -420,6 +420,54 @@ app.whenReady().then(async () => {
           pendingAuthCallbacks.delete(requestId);
           callback();
         }
+      });
+
+      contents.on('context-menu', (event, params) => {
+        const menuTemplate = [];
+
+        if (params.linkURL) {
+          menuTemplate.push({
+            label: 'Copy Link Address',
+            click: () => clipboard.writeText(params.linkURL),
+          });
+          menuTemplate.push({ type: 'separator' });
+        }
+
+        if (params.isEditable) {
+          menuTemplate.push({ label: 'Cut', role: 'cut' });
+          menuTemplate.push({ label: 'Copy', role: 'copy' });
+          menuTemplate.push({ label: 'Paste', role: 'paste' });
+          menuTemplate.push({ label: 'Select All', role: 'selectAll' });
+        } else if (params.selectionText) {
+          menuTemplate.push({ label: 'Copy', role: 'copy' });
+        }
+
+        if (menuTemplate.length > 0 && menuTemplate[menuTemplate.length - 1].type !== 'separator') {
+          menuTemplate.push({ type: 'separator' });
+        }
+
+        menuTemplate.push({
+          label: 'Back',
+          enabled: contents.canGoBack(),
+          click: () => contents.goBack(),
+        });
+        menuTemplate.push({
+          label: 'Forward',
+          enabled: contents.canGoForward(),
+          click: () => contents.goForward(),
+        });
+        menuTemplate.push({
+          label: 'Reload',
+          click: () => contents.reload(),
+        });
+        menuTemplate.push({ type: 'separator' });
+        menuTemplate.push({
+          label: 'Copy Page URL',
+          click: () => clipboard.writeText(contents.getURL()),
+        });
+
+        const menu = Menu.buildFromTemplate(menuTemplate);
+        menu.popup();
       });
     }
   });
