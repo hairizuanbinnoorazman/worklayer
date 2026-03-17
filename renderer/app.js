@@ -345,4 +345,21 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// ── Global Cmd+R / Ctrl+R handler ────────────────
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
+    e.preventDefault();
+    if (!focusedPanelId) return;
+    const group = getActiveGroup();
+    if (!group) return;
+    const panel = group.panels.find(p => p.id === focusedPanelId);
+    if (!panel || panel.type !== 'web') return;
+    const panelEl = document.querySelector(`[data-panel-id="${focusedPanelId}"]`);
+    if (panelEl) {
+      const refreshBtn = panelEl.querySelector('.nav-btn[title="Refresh"]');
+      if (refreshBtn) refreshBtn.click();
+    }
+  }
+});
+
 document.addEventListener('DOMContentLoaded', init);

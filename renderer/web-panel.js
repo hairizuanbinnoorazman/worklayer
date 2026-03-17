@@ -183,7 +183,7 @@ function renderWebPanel(panel, container) {
   });
 
   // Inject Cmd+F interceptor into webview guest page
-  const injectCmdFInterceptor = () => {
+  const injectKeyInterceptors = () => {
     webview.executeJavaScript(`
       if (!window.__panelSearchInjected) {
         window.__panelSearchInjected = true;
@@ -193,19 +193,27 @@ function renderWebPanel(panel, container) {
             e.stopPropagation();
             console.log('__PANEL_SEARCH_CMD_F__');
           }
+          if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('__PANEL_REFRESH_CMD_R__');
+          }
         }, true);
       }
     `).catch(() => {});
   };
 
-  webview.addEventListener('dom-ready', injectCmdFInterceptor);
-  webview.addEventListener('did-navigate', injectCmdFInterceptor);
+  webview.addEventListener('dom-ready', injectKeyInterceptors);
+  webview.addEventListener('did-navigate', injectKeyInterceptors);
 
-  // Handle Cmd+F from webview
+  // Handle Cmd+F and Cmd+R from webview
   webview.addEventListener('console-message', e => {
     if (e.message === '__PANEL_SEARCH_CMD_F__') {
       setFocusedPanel(panel.id);
       showPanelSearch(panel.id);
+    }
+    if (e.message === '__PANEL_REFRESH_CMD_R__') {
+      refreshBtn.click();
     }
   });
 
