@@ -544,6 +544,7 @@ webview {
   width: 100%;
   min-height: 0;
   display: flex;
+  background: #1e1e2e;
 }
 
 /* ── Terminal panel ──────────────────────────────── */

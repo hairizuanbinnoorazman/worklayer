@@ -45,6 +45,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('search:keystroke', listener);
     return () => ipcRenderer.removeListener('search:keystroke', listener);
   },
+  onWebviewRefresh: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:refresh', listener);
+    return () => ipcRenderer.removeListener('webview:refresh', listener);
+  },
+  onWebviewFind: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:find', listener);
+    return () => ipcRenderer.removeListener('webview:find', listener);
+  },
   searchFindInPage: (webContentsId, text, options) =>
     ipcRenderer.invoke('search:findInPage', { webContentsId, text, options }),
   searchStopFindInPage: (webContentsId, action) =>

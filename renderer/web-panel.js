@@ -1,5 +1,22 @@
 // web-panel.js - Web panel with webview
 
+// Registry: webContentsId -> { panelId, refresh(), showSearch() }
+const webviewRegistry = new Map();
+
+// IPC listeners for Cmd+R and Cmd+F from main process before-input-event
+if (window.electronAPI.onWebviewRefresh) {
+  window.electronAPI.onWebviewRefresh(({ webContentsId }) => {
+    const entry = webviewRegistry.get(webContentsId);
+    if (entry) entry.refresh();
+  });
+}
+if (window.electronAPI.onWebviewFind) {
+  window.electronAPI.onWebviewFind(({ webContentsId }) => {
+    const entry = webviewRegistry.get(webContentsId);
+    if (entry) entry.showSearch();
+  });
+}
+
 function renderWebPanel(panel, container) {
   const urlBar = document.createElement('div');
   urlBar.className = 'url-bar';
@@ -104,6 +121,7 @@ function renderWebPanel(panel, container) {
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
   let lastRealUrl = panel.url || '';
+  let crashRetryCount = 0;
 
   const navigate = (raw) => {
     let url = raw.trim();
@@ -176,45 +194,18 @@ function renderWebPanel(panel, container) {
   // Stop propagation so clicks in the URL bar don't lose focus unexpectedly
   urlInput.addEventListener('mousedown', e => e.stopPropagation());
 
-  // Store webContentsId once the webview is ready
+  // Store webContentsId once the webview is ready and register in webviewRegistry
   webview.addEventListener('dom-ready', () => {
     console.log(`[WebPanel] dom-ready panel=${panel.id}`);
     webview._webContentsId = webview.getWebContentsId();
-  });
-
-  // Inject Cmd+F interceptor into webview guest page
-  const injectKeyInterceptors = () => {
-    webview.executeJavaScript(`
-      if (!window.__panelSearchInjected) {
-        window.__panelSearchInjected = true;
-        document.addEventListener('keydown', (e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('__PANEL_SEARCH_CMD_F__');
-          }
-          if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('__PANEL_REFRESH_CMD_R__');
-          }
-        }, true);
-      }
-    `).catch(() => {});
-  };
-
-  webview.addEventListener('dom-ready', injectKeyInterceptors);
-  webview.addEventListener('did-navigate', injectKeyInterceptors);
-
-  // Handle Cmd+F and Cmd+R from webview
-  webview.addEventListener('console-message', e => {
-    if (e.message === '__PANEL_SEARCH_CMD_F__') {
-      setFocusedPanel(panel.id);
-      showPanelSearch(panel.id);
-    }
-    if (e.message === '__PANEL_REFRESH_CMD_R__') {
-      refreshBtn.click();
-    }
+    webviewRegistry.set(webview._webContentsId, {
+      panelId: panel.id,
+      refresh: () => refreshBtn.click(),
+      showSearch: () => {
+        setFocusedPanel(panel.id);
+        showPanelSearch(panel.id);
+      },
+    });
   });
 
   // Handle found-in-page results from findInPage
@@ -232,6 +223,7 @@ function renderWebPanel(panel, container) {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     if (!e.url.startsWith('data:')) {
       lastRealUrl = e.url;
+      crashRetryCount = 0;
       urlInput.value = e.url;
       updatePanelUrl(panel.id, e.url);
       addToUrlHistory(e.url, '');
@@ -269,6 +261,34 @@ function renderWebPanel(panel, container) {
       </body>
       </html>`;
     webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+  });
+
+  // Handle renderer crashes with auto-retry
+  webview.addEventListener('render-process-gone', e => {
+    const reason = e.reason || 'unknown';
+    const exitCode = e.exitCode;
+    console.log(`[WebPanel] render-process-gone panel=${panel.id} reason=${reason} exitCode=${exitCode} url=${lastRealUrl}`);
+
+    if (crashRetryCount < 5 && lastRealUrl) {
+      crashRetryCount++;
+      console.log(`[WebPanel] Auto-retry ${crashRetryCount}/5 for panel=${panel.id} url=${lastRealUrl}`);
+      setTimeout(() => webview.loadURL(lastRealUrl), 500);
+    } else {
+      console.log(`[WebPanel] Max retries reached for panel=${panel.id}, showing error page`);
+      const crashPage = `
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
+          <div style="text-align: center; max-width: 480px; padding: 2rem;">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
+            <h2 style="margin: 0 0 0.5rem;">Page crashed</h2>
+            <p style="color: #a6adc8; margin: 0 0 1rem;">${lastRealUrl || ''}</p>
+            <p style="color: #f38ba8;">The renderer process exited unexpectedly (${reason})</p>
+            ${lastRealUrl ? `<button data-url="${encodeURIComponent(lastRealUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Reload</button>` : ''}
+          </div>
+        </body>
+        </html>`;
+      webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(crashPage));
+    }
   });
 
   // Focus tracking when webview gains focus; stop search capture so keystrokes go to webview
