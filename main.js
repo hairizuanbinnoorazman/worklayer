@@ -376,9 +376,29 @@ app.whenReady().then(async () => {
     // Intercept keystrokes in webview contents when search capture is active
     if (contents.getType() === 'webview') {
       contents.on('before-input-event', (event, input) => {
-        const wcId = contents.id;
-        if (!capturingWebContents.has(wcId)) return;
         if (input.type !== 'keyDown') return;
+        const wcId = contents.id;
+
+        // Intercept Cmd+R and Cmd+F before search capture logic —
+        // works even on blank/crashed pages where injected JS can't run.
+        if ((input.meta || input.control) && input.key.toLowerCase() === 'r') {
+          event.preventDefault();
+          const host = contents.hostWebContents;
+          if (host && !host.isDestroyed()) {
+            host.send('webview:refresh', { webContentsId: wcId });
+          }
+          return;
+        }
+        if ((input.meta || input.control) && input.key.toLowerCase() === 'f') {
+          event.preventDefault();
+          const host = contents.hostWebContents;
+          if (host && !host.isDestroyed()) {
+            host.send('webview:find', { webContentsId: wcId });
+          }
+          return;
+        }
+
+        if (!capturingWebContents.has(wcId)) return;
         // Allow system shortcuts through
         if ((input.meta || input.control) && ['c', 'v', 'a', 'x', 'z'].includes(input.key.toLowerCase())) return;
         // Skip modifier-only keys
