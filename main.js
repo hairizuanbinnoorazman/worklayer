@@ -472,6 +472,32 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Custom application menu — omits Reload / Force Reload so Cmd+R
+  // doesn't blow away the renderer (the renderer handles it per-panel).
+  const appMenu = Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ label: app.name, submenu: [
+      { role: 'about' }, { type: 'separator' }, { role: 'services' },
+      { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' },
+      { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+    ]}] : []),
+    { label: 'Edit', submenu: [
+      { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ]},
+    { label: 'View', submenu: [
+      { role: 'toggleDevTools' }, { type: 'separator' },
+      { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+      { type: 'separator' }, { role: 'togglefullscreen' },
+    ]},
+    { label: 'Window', submenu: [
+      { role: 'minimize' }, { role: 'zoom' },
+      ...(process.platform === 'darwin'
+        ? [{ type: 'separator' }, { role: 'front' }]
+        : [{ role: 'close' }]),
+    ]},
+  ]);
+  Menu.setApplicationMenu(appMenu);
+
   debugLog('About to call createWindow()');
   createWindow();
   debugLog('createWindow() returned');
