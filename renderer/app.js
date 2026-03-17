@@ -48,7 +48,7 @@ async function init() {
   const saved = await window.electronAPI.loadState();
   if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
     state = saved;
-    if (!state.maxCachedGroups) state.maxCachedGroups = 5;
+    if (!state.maxCachedGroups || state.maxCachedGroups === 5) state.maxCachedGroups = 20;
     if (!state.templates) state.templates = [];
     if (!state.urlHistory) state.urlHistory = [];
     // Migrate: ensure all groups have lspServers
@@ -62,7 +62,7 @@ async function init() {
     const id = generateId();
     state = {
       activeGroupId: id,
-      maxCachedGroups: 5,
+      maxCachedGroups: 20,
       groups: [{ id, label: 'Work 1', panels: [], lspServers: [] }],
     };
   }
