@@ -60,6 +60,7 @@ async function mountTerminal(panel, container) {
   if (error) {
     terminal.write(`\r\n\x1b[31mError: ${error}\x1b[0m\r\n`);
     activeTerminals.set(panel.id, { terminal, fitAddon, searchAddon, cleanup: () => terminal.dispose() });
+    renderStatusBar();
     return;
   }
 
@@ -71,6 +72,7 @@ async function mountTerminal(panel, container) {
   window.electronAPI.onTerminalExit(termId, () => {
     terminal.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n');
     activeTerminals.delete(panel.id);
+    renderStatusBar();
   });
 
   // Shift+Enter: insert a newline without executing the command
@@ -102,4 +104,5 @@ async function mountTerminal(panel, container) {
   };
 
   activeTerminals.set(panel.id, { terminal, fitAddon, searchAddon, cleanup, termId });
+  renderStatusBar();
 }

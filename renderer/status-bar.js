@@ -14,6 +14,13 @@ function renderStatusBar() {
 
   bar.innerHTML = types.map(({ type, label, max }) => {
     const count = allPanels.filter(p => p.type === type).length;
+    if (type === 'terminal') {
+      const activeCount = activeTerminals.size;
+      return `<span class="status-bar-item">` +
+        `<span class="status-bar-dot ${type}"></span>` +
+        `${label} ${activeCount} active · ${count} / ${max}` +
+        `</span>`;
+    }
     return `<span class="status-bar-item">` +
       `<span class="status-bar-dot ${type}"></span>` +
       `${label} ${count} / ${max}` +

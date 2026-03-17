@@ -4,7 +4,7 @@ const groupDOMCache = new Map(); // groupId -> wrapper div
 const lruOrder = [];             // index 0 = least recently used
 
 function getMaxCached() {
-  return (state && state.maxCachedGroups) || 5;
+  return (state && state.maxCachedGroups) || 20;
 }
 
 function touchLRU(groupId) {
@@ -15,6 +15,7 @@ function touchLRU(groupId) {
 
 function evictLRU() {
   const max = getMaxCached();
+  let evicted = false;
   while (lruOrder.length > max) {
     const evictId = lruOrder.shift();
     console.log(`[GroupCache] Evicting group=${evictId} (cached=${groupDOMCache.size} max=${max})`);
@@ -25,7 +26,9 @@ function evictLRU() {
     }
     const group = state.groups.find(g => g.id === evictId);
     if (group) killGroupTerminals(group);
+    evicted = true;
   }
+  if (evicted) renderStatusBar();
 }
 
 function getCachedContainer(groupId) {
