@@ -51,6 +51,7 @@ async function init() {
     if (!state.maxCachedGroups || state.maxCachedGroups === 5) state.maxCachedGroups = 20;
     if (!state.templates) state.templates = [];
     if (!state.urlHistory) state.urlHistory = [];
+    if (!state.sidebarWidth) state.sidebarWidth = 210;
     // Migrate: ensure all groups have lspServers
     for (const group of state.groups) {
       group.lspServers = group.lspServers || [];
@@ -63,11 +64,13 @@ async function init() {
     state = {
       activeGroupId: id,
       maxCachedGroups: 20,
+      sidebarWidth: 210,
       groups: [{ id, label: 'Work 1', panels: [], lspServers: [] }],
     };
   }
 
   renderSidebar();
+  document.getElementById('sidebar').style.width = state.sidebarWidth + 'px';
   renderPanelStrip();
 
   let windowResizeTimer = null;
