@@ -310,6 +310,91 @@ function updatePanelWidth(panelId, width) {
   if (panel) panel.width = Math.max(300, Math.round(width));
 }
 
+function applyPanelSettings(panelId, newSettings) {
+  const group = getActiveGroup();
+  if (!group) return;
+  const panel = group.panels.find(p => p.id === panelId);
+  if (!panel) return;
+
+  if (panel.type === 'terminal') {
+    const cwdChanged = (newSettings.cwd || '') !== (panel.cwd || '');
+    const cmdChanged = (newSettings.initialCommand || '') !== (panel.initialCommand || '');
+    panel.cwd = newSettings.cwd || '';
+    panel.initialCommand = newSettings.initialCommand || '';
+    if (cwdChanged || cmdChanged) {
+      rebuildTerminalPanel(panelId, panel);
+    }
+  } else if (panel.type === 'web') {
+    const urlChanged = (newSettings.url || '') !== (panel.url || '');
+    if (urlChanged && newSettings.url) {
+      navigateWebPanel(panelId, newSettings.url);
+    }
+  } else if (panel.type === 'file') {
+    const dirChanged = (newSettings.rootDir || '') !== (panel.rootDir || '');
+    panel.rootDir = newSettings.rootDir || '';
+    if (dirChanged) {
+      panel.openFile = null;
+      rebuildFilePanel(panelId, panel);
+    }
+  }
+
+  saveState();
+}
+
+function rebuildTerminalPanel(panelId, panel) {
+  // Kill existing PTY
+  if (activeTerminals.has(panelId)) {
+    const { cleanup } = activeTerminals.get(panelId);
+    if (cleanup) cleanup();
+  }
+
+  const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+  if (!panelEl) return;
+  const content = panelEl.querySelector('.panel-content');
+  if (!content) return;
+  content.innerHTML = '';
+  renderTermPanel(panel, content);
+}
+
+function navigateWebPanel(panelId, url) {
+  let normalizedUrl = url.trim();
+  if (!normalizedUrl) return;
+  if (!/^[a-z][a-z\d+\-.]*:/i.test(normalizedUrl)) {
+    if (/^[\w-]+(\.[\w-]+)+/.test(normalizedUrl) && !normalizedUrl.includes(' ')) {
+      normalizedUrl = 'https://' + normalizedUrl;
+    } else {
+      normalizedUrl = 'https://www.google.com/search?q=' + encodeURIComponent(normalizedUrl);
+    }
+  }
+
+  const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+  if (!panelEl) return;
+  const webview = panelEl.querySelector('webview');
+  if (webview) {
+    webview.src = normalizedUrl;
+  }
+  const urlInput = panelEl.querySelector('.url-input');
+  if (urlInput) {
+    urlInput.value = normalizedUrl;
+  }
+  // State is updated by the did-navigate handler on the webview
+}
+
+function rebuildFilePanel(panelId, panel) {
+  // Dispose active editor
+  if (activeEditors.has(panelId)) {
+    const { dispose } = activeEditors.get(panelId);
+    if (dispose) dispose();
+  }
+
+  const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+  if (!panelEl) return;
+  const content = panelEl.querySelector('.panel-content');
+  if (!content) return;
+  content.innerHTML = '';
+  renderFilePanel(panel, content);
+}
+
 function addToUrlHistory(url, title) {
   if (!url || url === 'about:blank' || url.startsWith('data:')) return;
   state.urlHistory = state.urlHistory.filter(entry => entry.url !== url);

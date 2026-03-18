@@ -127,12 +127,22 @@ function createPanelElement(panel) {
   typeLabel.className = 'panel-type-label';
   typeLabel.textContent = panel.type === 'web' ? 'Web' : panel.type === 'file' ? 'Files' : 'Terminal';
 
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'panel-settings-btn';
+  settingsBtn.textContent = '\u2699';
+  settingsBtn.title = 'Panel settings';
+  settingsBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    showPanelSettingsModal(panel);
+  });
+
   const closeBtn = document.createElement('button');
   closeBtn.className = 'panel-close-btn';
   closeBtn.textContent = '\u00d7';
   closeBtn.addEventListener('click', () => removePanel(panel.id));
 
   header.appendChild(typeLabel);
+  header.appendChild(settingsBtn);
   header.appendChild(closeBtn);
   el.appendChild(header);
 
@@ -152,7 +162,7 @@ function createPanelElement(panel) {
   // Focus tracking: clicking a panel focuses it
   el.addEventListener('mousedown', e => {
     // Don't steal focus when clicking close button
-    if (e.target.closest('.panel-close-btn')) return;
+    if (e.target.closest('.panel-close-btn') || e.target.closest('.panel-settings-btn')) return;
     setFocusedPanel(panel.id);
   });
 
