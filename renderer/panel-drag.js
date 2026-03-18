@@ -9,7 +9,7 @@ function initPanelDrag(panelEl) {
   if (!header) return;
 
   header.addEventListener('mousedown', e => {
-    if (e.target.closest('.panel-close-btn')) return;
+    if (e.target.closest('.panel-close-btn') || e.target.closest('.panel-settings-btn')) return;
     e.preventDefault();
     dragState = {
       panelEl,

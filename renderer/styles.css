@@ -339,6 +339,20 @@ body {
 
 .panel-close-btn:hover { color: #ff6b6b; background: #3a1a1a; }
 
+.panel-settings-btn {
+  background: none;
+  border: none;
+  color: #556;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.panel-settings-btn:hover { color: #ccc; background: #2a2a4e; }
+
 .panel.dragging {
   opacity: 0.5;
   z-index: 100;
