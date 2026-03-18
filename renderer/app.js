@@ -256,6 +256,67 @@ async function addPanel(type) {
   saveState();
 }
 
+function addWebPanelAt(url, insertIndex) {
+  const group = getActiveGroup();
+  if (!group) return;
+
+  const globalWebCount = state.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
+  if (globalWebCount >= MAX_WEB_PANELS) return;
+
+  const panel = {
+    id: generateId(),
+    type: 'web',
+    width: DEFAULT_WEB_WIDTH,
+    url: url || '',
+  };
+
+  const idx = Math.max(0, Math.min(insertIndex, group.panels.length));
+  group.panels.splice(idx, 0, panel);
+
+  const cached = getCachedContainer(state.activeGroupId);
+  if (cached) {
+    const panelEls = cached.querySelectorAll('.panel');
+    const addControls = cached.querySelector('.add-panel-controls');
+    const panelEl = createPanelElement(panel);
+    const resizeHandle = createResizeHandle(panel.id);
+
+    if (idx < panelEls.length) {
+      cached.insertBefore(panelEl, panelEls[idx]);
+      cached.insertBefore(resizeHandle, panelEls[idx]);
+    } else if (addControls) {
+      cached.insertBefore(panelEl, addControls);
+      cached.insertBefore(resizeHandle, addControls);
+    } else {
+      removeCachedGroup(state.activeGroupId);
+      renderPanelStrip();
+      saveState();
+      return;
+    }
+    renderStatusBar();
+  } else {
+    renderPanelStrip();
+  }
+
+  saveState();
+}
+
+function addWebPanelAfter(sourcePanelId, url) {
+  const group = getActiveGroup();
+  if (!group) return;
+  const sourceIndex = group.panels.findIndex(p => p.id === sourcePanelId);
+  if (sourceIndex === -1) {
+    addWebPanelAt(url, group.panels.length);
+  } else {
+    addWebPanelAt(url, sourceIndex + 1);
+  }
+}
+
+function addWebPanelAtEnd(url) {
+  const group = getActiveGroup();
+  if (!group) return;
+  addWebPanelAt(url, group.panels.length);
+}
+
 function removePanel(panelId) {
   const group = getActiveGroup();
   if (!group) return;
