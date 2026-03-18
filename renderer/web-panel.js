@@ -16,6 +16,16 @@ if (window.electronAPI.onWebviewFind) {
     if (entry) entry.showSearch();
   });
 }
+if (window.electronAPI.onWebviewOpenInNewPanel) {
+  window.electronAPI.onWebviewOpenInNewPanel(({ url, sourceWebContentsId, disposition }) => {
+    const entry = webviewRegistry.get(sourceWebContentsId);
+    if (disposition === 'foreground-tab' && entry) {
+      addWebPanelAfter(entry.panelId, url);
+    } else {
+      addWebPanelAtEnd(url);
+    }
+  });
+}
 
 function renderWebPanel(panel, container) {
   const urlBar = document.createElement('div');

@@ -55,6 +55,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('webview:find', listener);
     return () => ipcRenderer.removeListener('webview:find', listener);
   },
+  onWebviewOpenInNewPanel: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:open-in-new-panel', listener);
+    return () => ipcRenderer.removeListener('webview:open-in-new-panel', listener);
+  },
   searchFindInPage: (webContentsId, text, options) =>
     ipcRenderer.invoke('search:findInPage', { webContentsId, text, options }),
   searchStopFindInPage: (webContentsId, action) =>

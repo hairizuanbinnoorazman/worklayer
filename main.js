@@ -442,10 +442,39 @@ app.whenReady().then(async () => {
         }
       });
 
+      contents.setWindowOpenHandler(({ url, disposition }) => {
+        debugLog('[setWindowOpenHandler] url:', url, 'disposition:', disposition);
+        if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+          return { action: 'deny' };
+        }
+        const host = contents.hostWebContents;
+        if (host && !host.isDestroyed()) {
+          host.send('webview:open-in-new-panel', {
+            url,
+            sourceWebContentsId: contents.id,
+            disposition,
+          });
+        }
+        return { action: 'deny' };
+      });
+
       contents.on('context-menu', (event, params) => {
         const menuTemplate = [];
 
         if (params.linkURL) {
+          menuTemplate.push({
+            label: 'Open Link in New Panel',
+            click: () => {
+              const host = contents.hostWebContents;
+              if (host && !host.isDestroyed()) {
+                host.send('webview:open-in-new-panel', {
+                  url: params.linkURL,
+                  sourceWebContentsId: contents.id,
+                  disposition: 'new-window',
+                });
+              }
+            },
+          });
           menuTemplate.push({
             label: 'Copy Link Address',
             click: () => clipboard.writeText(params.linkURL),
