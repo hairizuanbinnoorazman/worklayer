@@ -9,19 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
         setFocusedPanel(null);
       }
     });
-
-    // Disable pointer-events during scroll to avoid hit-testing overhead
-    let scrollTimeout = null;
-    strip.addEventListener('scroll', () => {
-      if (!scrollTimeout) {
-        strip.style.pointerEvents = 'none';
-      }
-      clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(() => {
-        strip.style.pointerEvents = '';
-        scrollTimeout = null;
-      }, 150);
-    }, { passive: true });
   }
 });
 
