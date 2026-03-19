@@ -288,7 +288,9 @@ ipcMain.on('auth:login-response', (_, { requestId, username, password, cancelled
   else callback(username, password);
 });
 
-app.disableHardwareAcceleration();
+// Re-enable GPU compositing (was disabled only to silence log noise in commit 79af0a5).
+// Suppress the cosmetic GPU compositor warnings via log-level flag.
+app.commandLine.appendSwitch('log-level', '3');
 
 app.whenReady().then(async () => {
   debugLog('whenReady callback entered');
