@@ -1,8 +1,11 @@
 // panel-drag.js - Drag-and-drop reordering for panels
 
 const DRAG_THRESHOLD = 8;
+const AUTO_SCROLL_EDGE_PX = 60;
+const AUTO_SCROLL_MAX_SPEED = 15;
 
 let dragState = null;
+let autoScrollRafId = null;
 
 function initPanelDrag(panelEl) {
   const header = panelEl.querySelector('.panel-header');
@@ -14,6 +17,7 @@ function initPanelDrag(panelEl) {
 
     // Clean up any in-progress drag before starting a new one
     if (dragState) {
+      stopAutoScroll();
       if (dragState.started) {
         dragState.panelEl.classList.remove('dragging');
         if (dragState.indicator) {
@@ -39,6 +43,8 @@ function initPanelDrag(panelEl) {
 function onDragMove(e) {
   if (!dragState) return;
 
+  dragState.lastClientX = e.clientX;
+
   if (!dragState.started) {
     if (Math.abs(e.clientX - dragState.startX) < DRAG_THRESHOLD) return;
     dragState.started = true;
@@ -49,7 +55,15 @@ function onDragMove(e) {
     dragState.indicator = indicator;
     const container = getCachedContainer(state.activeGroupId);
     (container || document.getElementById('panel-strip')).appendChild(indicator);
+
+    startAutoScroll();
   }
+
+  updateDropIndicator();
+}
+
+function updateDropIndicator() {
+  if (!dragState || !dragState.started) return;
 
   const container = getCachedContainer(state.activeGroupId);
   const scope = container || document.getElementById('panel-strip');
@@ -59,14 +73,13 @@ function onDragMove(e) {
   for (const panel of panels) {
     const rect = panel.getBoundingClientRect();
     const midX = rect.left + rect.width / 2;
-    if (e.clientX < midX) {
+    if (dragState.lastClientX < midX) {
       insertBeforeEl = panel;
       break;
     }
   }
 
   // Position the indicator
-  const strip = document.getElementById('panel-strip');
   if (insertBeforeEl) {
     const rect = insertBeforeEl.getBoundingClientRect();
     const scopeRect = scope.getBoundingClientRect();
@@ -83,7 +96,46 @@ function onDragMove(e) {
   dragState.insertBeforeEl = insertBeforeEl;
 }
 
+function startAutoScroll() {
+  if (autoScrollRafId != null) return;
+
+  function tick() {
+    if (!dragState || !dragState.started) { stopAutoScroll(); return; }
+
+    const strip = document.getElementById('panel-strip');
+    const rect = strip.getBoundingClientRect();
+    const x = dragState.lastClientX;
+    let delta = 0;
+
+    if (x < rect.left + AUTO_SCROLL_EDGE_PX) {
+      const depth = rect.left + AUTO_SCROLL_EDGE_PX - x;
+      delta = -(depth / AUTO_SCROLL_EDGE_PX) * AUTO_SCROLL_MAX_SPEED;
+    } else if (x > rect.right - AUTO_SCROLL_EDGE_PX) {
+      const depth = x - (rect.right - AUTO_SCROLL_EDGE_PX);
+      delta = (depth / AUTO_SCROLL_EDGE_PX) * AUTO_SCROLL_MAX_SPEED;
+    }
+
+    if (delta !== 0) {
+      const maxScroll = strip.scrollWidth - strip.clientWidth;
+      strip.scrollLeft = Math.max(0, Math.min(maxScroll, strip.scrollLeft + delta));
+      updateDropIndicator();
+    }
+
+    autoScrollRafId = requestAnimationFrame(tick);
+  }
+
+  autoScrollRafId = requestAnimationFrame(tick);
+}
+
+function stopAutoScroll() {
+  if (autoScrollRafId != null) {
+    cancelAnimationFrame(autoScrollRafId);
+    autoScrollRafId = null;
+  }
+}
+
 function onDragEnd() {
+  stopAutoScroll();
   document.removeEventListener('mousemove', onDragMove);
   document.removeEventListener('mouseup', onDragEnd);
 
