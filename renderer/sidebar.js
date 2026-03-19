@@ -73,3 +73,34 @@ function startRenameGroup(groupId, labelEl) {
   input.focus();
   input.select();
 }
+
+// ── Sidebar resize ───────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const handle = document.getElementById('sidebar-resize-handle');
+  const sidebar = document.getElementById('sidebar');
+  if (!handle || !sidebar) return;
+
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebar.offsetWidth;
+    handle.classList.add('active');
+
+    const onMove = (ev) => {
+      const newWidth = Math.max(150, Math.min(500, startW + (ev.clientX - startX)));
+      sidebar.style.width = newWidth + 'px';
+      state.sidebarWidth = newWidth;
+      fitVisibleTerminals(state.activeGroupId);
+    };
+
+    const onUp = () => {
+      handle.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      saveState();
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+});
