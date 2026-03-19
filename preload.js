@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.once(channel, callback);
   },
 
+  onTerminalBrowserOpen: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('terminal:browser-open', listener);
+    return () => ipcRenderer.removeListener('terminal:browser-open', listener);
+  },
+
   debugGetCookies: (url) => ipcRenderer.invoke('debug:getCookies', { url }),
   debugGetCookieCount: () => ipcRenderer.invoke('debug:getCookieCount'),
 
