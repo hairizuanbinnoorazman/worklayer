@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, session, webContents, Menu, clipboa
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const http = require('http');
+const crypto = require('crypto');
 
 const DEBUG_LOG = '/tmp/worklayer-debug.log';
 function debugLog(...args) {
@@ -35,6 +37,12 @@ let cookieBackupFile;
 let cookieSaveInterval;
 const terminals = new Map();
 let termIdCounter = 0;
+
+// Browser intercept: local HTTP server + helper scripts
+let browserInterceptServer = null;
+let browserInterceptPort = 0;
+const browserInterceptToken = crypto.randomBytes(16).toString('hex');
+let browserHelperDir = null;
 
 function saveSessionCookies() {
   if (!cookieBackupFile) return;
@@ -104,12 +112,19 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) =
 
   const spawnCwd = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
 
+  const termEnv = { ...process.env };
+  termEnv.WORKLAYER_TERM_ID = String(id);
+  if (browserHelperDir) {
+    termEnv.BROWSER = path.join(browserHelperDir, 'worklayer-browser');
+    termEnv.PATH = browserHelperDir + ':' + (termEnv.PATH || '');
+  }
+
   const term = pty.spawn(shell, [], {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
     cwd: spawnCwd,
-    env: process.env,
+    env: termEnv,
   });
 
   term.onData((data) => {
@@ -287,6 +302,119 @@ ipcMain.on('auth:login-response', (_, { requestId, username, password, cancelled
   if (cancelled) callback();
   else callback(username, password);
 });
+
+function setupBrowserHelperScripts() {
+  browserHelperDir = path.join(app.getPath('userData'), 'browser-helpers');
+  if (!fs.existsSync(browserHelperDir)) {
+    fs.mkdirSync(browserHelperDir, { recursive: true });
+  }
+
+  // worklayer-browser: used as $BROWSER env var
+  const worklayerBrowserPath = path.join(browserHelperDir, 'worklayer-browser');
+  const worklayerBrowserScript = `#!/bin/sh
+URL="$1"
+if [ -z "$URL" ]; then exit 0; fi
+TERM_ID="$WORKLAYER_TERM_ID"
+curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&url=$(printf '%s' "$URL" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
+`;
+  fs.writeFileSync(worklayerBrowserPath, worklayerBrowserScript, { mode: 0o755 });
+
+  // open wrapper: intercepts URLs, passes non-URLs to /usr/bin/open
+  const openWrapperPath = path.join(browserHelperDir, 'open');
+  const openWrapperScript = `#!/bin/sh
+# Worklayer open wrapper — intercepts URL arguments
+IS_URL=0
+TARGET=""
+PASSTHROUGH_ARGS=""
+for arg in "$@"; do
+  case "$arg" in
+    http://*|https://*)
+      IS_URL=1
+      TARGET="$arg"
+      ;;
+    -*)
+      PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"
+      ;;
+    *)
+      if [ -z "$TARGET" ]; then
+        TARGET="$arg"
+      else
+        PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"
+      fi
+      ;;
+  esac
+done
+if [ "$IS_URL" = "1" ] && [ -n "$TARGET" ]; then
+  TERM_ID="$WORKLAYER_TERM_ID"
+  curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&url=$(printf '%s' "$TARGET" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
+else
+  /usr/bin/open $PASSTHROUGH_ARGS "$TARGET"
+fi
+`;
+  fs.writeFileSync(openWrapperPath, openWrapperScript, { mode: 0o755 });
+
+  debugLog('[BrowserIntercept] Helper scripts written to', browserHelperDir);
+}
+
+function startBrowserInterceptServer() {
+  return new Promise((resolve, reject) => {
+    browserInterceptServer = http.createServer((req, res) => {
+      try {
+        const url = new URL(req.url, `http://127.0.0.1`);
+        if (url.pathname !== '/open') {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+
+        const token = url.searchParams.get('token');
+        if (token !== browserInterceptToken) {
+          debugLog('[BrowserIntercept] Invalid token');
+          res.writeHead(403);
+          res.end();
+          return;
+        }
+
+        const termId = url.searchParams.get('termId');
+        const openUrl = url.searchParams.get('url');
+
+        if (!openUrl) {
+          res.writeHead(400);
+          res.end();
+          return;
+        }
+
+        debugLog('[BrowserIntercept] Open request: termId=', termId, 'url=', openUrl);
+
+        const wins = BrowserWindow.getAllWindows();
+        if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
+          wins[0].webContents.send('terminal:browser-open', {
+            termId: termId ? parseInt(termId, 10) : null,
+            url: openUrl,
+          });
+        }
+
+        res.writeHead(200);
+        res.end('ok');
+      } catch (e) {
+        debugLog('[BrowserIntercept] Error:', e.message);
+        res.writeHead(500);
+        res.end();
+      }
+    });
+
+    browserInterceptServer.listen(0, '127.0.0.1', () => {
+      browserInterceptPort = browserInterceptServer.address().port;
+      debugLog('[BrowserIntercept] Server listening on 127.0.0.1:' + browserInterceptPort);
+      resolve();
+    });
+
+    browserInterceptServer.on('error', (err) => {
+      debugLog('[BrowserIntercept] Server error:', err.message);
+      reject(err);
+    });
+  });
+}
 
 // Re-enable GPU compositing (was disabled only to silence log noise in commit 79af0a5).
 // Suppress the cosmetic GPU compositor warnings via log-level flag.
@@ -553,6 +681,14 @@ app.whenReady().then(async () => {
   createWindow();
   debugLog('createWindow() returned');
 
+  // Start browser intercept server and generate helper scripts
+  try {
+    await startBrowserInterceptServer();
+    setupBrowserHelperScripts();
+  } catch (e) {
+    debugLog('[BrowserIntercept] Failed to start:', e.message);
+  }
+
   // Periodically save session cookies to disk (every 60s)
   cookieSaveInterval = setInterval(saveSessionCookies, 60 * 1000);
   debugLog('Cookie save interval started (60s)');
@@ -568,6 +704,15 @@ app.on('window-all-closed', () => {
   for (const [, term] of terminals) {
     try { term.kill(); } catch (e) {}
   }
+
+  // Clean up browser intercept server and helper scripts
+  if (browserInterceptServer) {
+    try { browserInterceptServer.close(); } catch (e) {}
+  }
+  if (browserHelperDir && fs.existsSync(browserHelperDir)) {
+    try { fs.rmSync(browserHelperDir, { recursive: true, force: true }); } catch (e) {}
+  }
+
   if (process.platform !== 'darwin') app.quit();
 });
 
