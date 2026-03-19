@@ -8,6 +8,8 @@ const MAX_TERMINAL_PANELS = 20;
 const MAX_WEB_PANELS = 20;
 const MAX_FILE_PANELS = 10;
 const MAX_URL_HISTORY = 100;
+const MAX_URL_COUNT = 10;
+const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
 let state = { activeGroupId: null, groups: [], templates: [], urlHistory: [] };
 
@@ -52,6 +54,11 @@ async function init() {
     if (!state.templates) state.templates = [];
     if (!state.urlHistory) state.urlHistory = [];
     if (!state.sidebarWidth) state.sidebarWidth = 210;
+    // Migrate: ensure all URL history entries have count/lastAccessed
+    for (const entry of state.urlHistory) {
+      if (!entry.count) entry.count = 1;
+      if (!entry.lastAccessed) entry.lastAccessed = entry.timestamp || Date.now();
+    }
     // Migrate: ensure all groups have lspServers
     for (const group of state.groups) {
       group.lspServers = group.lspServers || [];
@@ -461,8 +468,17 @@ function rebuildFilePanel(panelId, panel) {
 
 function addToUrlHistory(url, title) {
   if (!url || url === 'about:blank' || url.startsWith('data:')) return;
-  state.urlHistory = state.urlHistory.filter(entry => entry.url !== url);
-  state.urlHistory.unshift({ url, title: title || '', timestamp: Date.now() });
+  const idx = state.urlHistory.findIndex(e => e.url === url);
+  if (idx !== -1) {
+    const entry = state.urlHistory[idx];
+    entry.count = Math.min((entry.count || 1) + 1, MAX_URL_COUNT);
+    entry.lastAccessed = Date.now();
+    if (title) entry.title = title;
+    state.urlHistory.splice(idx, 1);
+    state.urlHistory.unshift(entry);
+  } else {
+    state.urlHistory.unshift({ url, title: title || '', timestamp: Date.now(), count: 1, lastAccessed: Date.now() });
+  }
   if (state.urlHistory.length > MAX_URL_HISTORY) {
     state.urlHistory = state.urlHistory.slice(0, MAX_URL_HISTORY);
   }
@@ -470,11 +486,37 @@ function addToUrlHistory(url, title) {
 }
 
 function getFilteredUrlHistory(query) {
+  applyUrlHistoryDecay();
   const q = (query || '').toLowerCase().trim();
-  if (!q) return state.urlHistory.slice(0, 10);
-  return state.urlHistory
-    .filter(entry => entry.url.toLowerCase().includes(q) || (entry.title && entry.title.toLowerCase().includes(q)))
-    .slice(0, 10);
+  let results = state.urlHistory;
+  if (q) {
+    results = results.filter(e => e.url.toLowerCase().includes(q) || (e.title && e.title.toLowerCase().includes(q)));
+  }
+  return results.slice().sort((a, b) => {
+    const cd = (b.count || 1) - (a.count || 1);
+    if (cd !== 0) return cd;
+    return (b.lastAccessed || b.timestamp || 0) - (a.lastAccessed || a.timestamp || 0);
+  }).slice(0, 10);
+}
+
+let lastDecayCheck = 0;
+
+function applyUrlHistoryDecay() {
+  const now = Date.now();
+  if (now - lastDecayCheck < 60000) return;
+  lastDecayCheck = now;
+  let changed = false;
+  state.urlHistory = state.urlHistory.filter(entry => {
+    const lastAccessed = entry.lastAccessed || entry.timestamp || 0;
+    const weeks = Math.floor((now - lastAccessed) / URL_DECAY_INTERVAL_MS);
+    if (weeks > 0) {
+      const newCount = (entry.count || 1) - weeks;
+      if (newCount <= 0) { changed = true; return false; }
+      if (newCount !== (entry.count || 1)) { entry.count = newCount; changed = true; }
+    }
+    return true;
+  });
+  if (changed) saveState();
 }
 
 // ── Global Cmd+F / Ctrl+F handler ────────────────
