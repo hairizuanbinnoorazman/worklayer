@@ -11,6 +11,20 @@ function initPanelDrag(panelEl) {
   header.addEventListener('mousedown', e => {
     if (e.target.closest('.panel-close-btn') || e.target.closest('.panel-settings-btn')) return;
     e.preventDefault();
+
+    // Clean up any in-progress drag before starting a new one
+    if (dragState) {
+      if (dragState.started) {
+        dragState.panelEl.classList.remove('dragging');
+        if (dragState.indicator) {
+          dragState.indicator.remove();
+        }
+      }
+      document.removeEventListener('mousemove', onDragMove);
+      document.removeEventListener('mouseup', onDragEnd);
+      dragState = null;
+    }
+
     dragState = {
       panelEl,
       startX: e.clientX,
