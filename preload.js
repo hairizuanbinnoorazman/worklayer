@@ -85,6 +85,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   authLoginResponse: (requestId, username, password, cancelled) =>
     ipcRenderer.send('auth:login-response', { requestId, username, password, cancelled }),
 
+  // CDP webview registration
+  cdpRegisterWebview: (webContentsId, panelId, url) =>
+    ipcRenderer.send('cdp:register-webview', { webContentsId, panelId, url }),
+  cdpUnregisterWebview: (webContentsId) =>
+    ipcRenderer.send('cdp:unregister-webview', { webContentsId }),
+  cdpUpdateWebview: (webContentsId, url, title) =>
+    ipcRenderer.send('cdp:update-webview', { webContentsId, url, title }),
+
   onLspNotification: (serverId, callback) => {
     const channel = `lsp:notification:${serverId}`;
     const listener = (_, msg) => callback(msg);
