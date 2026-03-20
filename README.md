@@ -39,22 +39,27 @@ worklayer/
 ├── renderer/
 │   ├── index.html                 App shell
 │   ├── styles.css                 Dark theme styles
-│   ├── app.js                     State management and core operations
-│   ├── sidebar.js                 Workspace sidebar component
-│   ├── panel-strip.js             Horizontal panel area component
-│   ├── web-panel.js               Web panel (webview) component
-│   ├── term-panel.js              Terminal panel (xterm.js) component
-│   ├── file-panel.js              File browser + Monaco editor component
-│   ├── workspace-modal.js         Modal for creating/configuring workspaces
-│   ├── panel-settings-modal.js    Per-panel settings modal
-│   ├── panel-search.js            Web panel find-in-page search
-│   ├── auth-modal.js              HTTP auth dialog
-│   ├── lsp-bridge.js              LSP client bridge for Monaco
-│   ├── lsp-settings-modal.js      Per-workspace LSP config modal
-│   ├── browser-intercept.js       Terminal browser open interception
-│   ├── status-bar.js              Panel count status indicator
-│   ├── group-cache.js             DOM caching mechanism
-│   └── panel-drag.js              Drag-to-resize and reorder handles
+│   ├── core/
+│   │   ├── app.js                 State management and core operations
+│   │   └── group-cache.js         DOM caching mechanism
+│   ├── layout/
+│   │   └── sidebar.js             Workspace sidebar component
+│   ├── panels/
+│   │   ├── panel-strip.js         Horizontal panel area component
+│   │   ├── web-panel.js           Web panel (webview) component
+│   │   ├── term-panel.js          Terminal panel (xterm.js) component
+│   │   ├── file-panel.js          File browser + Monaco editor component
+│   │   ├── panel-search.js        Web panel find-in-page search
+│   │   ├── panel-drag.js          Drag-to-resize and reorder handles
+│   │   ├── status-bar.js          Panel count status indicator
+│   │   └── browser-intercept.js   Terminal browser open interception
+│   ├── modals/
+│   │   ├── workspace-modal.js     Modal for creating/configuring workspaces
+│   │   ├── panel-settings-modal.js  Per-panel settings modal
+│   │   ├── lsp-settings-modal.js  Per-workspace LSP config modal
+│   │   └── auth-modal.js          HTTP auth dialog
+│   └── lsp/
+│       └── lsp-bridge.js          LSP client bridge for Monaco
 ├── mcp-server/
 │   ├── package.json               MCP server dependencies
 │   ├── index.js                   MCP server entry point
