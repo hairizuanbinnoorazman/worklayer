@@ -3,8 +3,8 @@
 // Map<serverId, { cleanupNotifications, providers[] }>
 const activeLspConnections = new Map();
 
-// Debounce timers for didChange per filePath
-const didChangeTimers = new Map();
+// Debounce entries for didChange per filePath: Map<key, {timer, flush}>
+const didChangePending = new Map();
 
 const DIDCHANGE_DEBOUNCE_MS = 300;
 
@@ -100,12 +100,24 @@ function registerLspProviders(serverId, serverKey, languageId) {
   // Completion provider
   const completionDisposable = monaco.languages.registerCompletionItemProvider(languageId, {
     triggerCharacters: ['.', '('],
-    provideCompletionItems: async (model, position) => {
+    provideCompletionItems: async (model, position, context) => {
       console.log(`[LSP-bridge] completion request to ${serverKey} at line ${position.lineNumber}`);
       try {
+        // Flush any pending didChange so the LSP server has up-to-date content
+        const filePath = uriToFilePath(model.uri.toString());
+        flushDidChange(serverId, filePath);
+
+        // Map Monaco trigger kind to LSP trigger kind (Monaco is 0-based, LSP is 1-based)
+        const triggerKind = (context.triggerKind || 0) + 1;
+        const lspContext = { triggerKind };
+        if (context.triggerCharacter) {
+          lspContext.triggerCharacter = context.triggerCharacter;
+        }
+
         const response = await window.electronAPI.lspSendRequest(serverId, 'textDocument/completion', {
           textDocument: { uri: model.uri.toString() },
           position: monacoPositionToLsp(position),
+          context: lspContext,
         });
 
         if (!response || response.error) {
@@ -120,30 +132,71 @@ function registerLspProviders(serverId, serverKey, languageId) {
         console.log(`[LSP-bridge] completion: got ${items.length} items from ${serverKey}`);
 
         const word = model.getWordUntilPosition(position);
-        const range = {
+        const fallbackRange = {
           startLineNumber: position.lineNumber,
           startColumn: word.startColumn,
           endLineNumber: position.lineNumber,
           endColumn: word.endColumn,
         };
 
-        const suggestions = items.map(item => ({
-          label: item.label,
-          kind: lspCompletionKindToMonaco(item.kind),
-          insertText: item.insertText || item.label,
-          detail: item.detail || '',
-          documentation: item.documentation
-            ? (typeof item.documentation === 'string' ? item.documentation : item.documentation.value)
-            : '',
-          range,
-          sortText: item.sortText || item.label,
-        }));
+        const suggestions = items.map(item => {
+          // Determine range and insertText from textEdit if available
+          let range = fallbackRange;
+          let insertText = item.insertText || item.label;
+          if (item.textEdit) {
+            const lspRange = item.textEdit.range || item.textEdit.insert;
+            if (lspRange) {
+              const converted = lspRangeToMonaco(lspRange);
+              // Validate: range must be on the same line as the cursor and within model bounds
+              if (converted.startLineNumber === position.lineNumber &&
+                  converted.endLineNumber === position.lineNumber &&
+                  converted.startColumn >= 1 &&
+                  converted.endColumn <= model.getLineMaxColumn(position.lineNumber)) {
+                range = converted;
+              }
+              insertText = item.textEdit.newText;
+            }
+          }
+
+          return {
+            label: item.label,
+            kind: lspCompletionKindToMonaco(item.kind),
+            insertText,
+            detail: item.detail || '',
+            documentation: item.documentation
+              ? (typeof item.documentation === 'string' ? item.documentation : item.documentation.value)
+              : '',
+            range,
+            sortText: item.sortText || item.label,
+            preselect: !!item.preselect,
+            filterText: item.filterText || undefined,
+            _lspItem: item,
+          };
+        });
 
         return { suggestions };
       } catch (e) {
         console.warn(`[LSP-bridge] completion exception from ${serverKey}:`, e);
         return { suggestions: [] };
       }
+    },
+    resolveCompletionItem: async (item) => {
+      if (!item._lspItem) return item;
+      try {
+        const response = await window.electronAPI.lspSendRequest(serverId, 'completionItem/resolve', item._lspItem);
+        if (response && !response.error && response.result) {
+          const resolved = response.result;
+          if (resolved.detail) item.detail = resolved.detail;
+          if (resolved.documentation) {
+            item.documentation = typeof resolved.documentation === 'string'
+              ? resolved.documentation
+              : resolved.documentation.value || '';
+          }
+        }
+      } catch (e) {
+        console.warn(`[LSP-bridge] resolve exception from ${serverKey}:`, e);
+      }
+      return item;
     },
   });
   providers.push(completionDisposable);
@@ -205,10 +258,11 @@ function lspDidOpen(serverId, filePath, languageId, content) {
 
 function lspDidChange(serverId, filePath, content, version) {
   const key = `${serverId}:${filePath}`;
-  clearTimeout(didChangeTimers.get(key));
+  const existing = didChangePending.get(key);
+  if (existing) clearTimeout(existing.timer);
 
-  didChangeTimers.set(key, setTimeout(() => {
-    didChangeTimers.delete(key);
+  const send = () => {
+    didChangePending.delete(key);
     const uri = filePathToUri(filePath);
     window.electronAPI.lspSendNotification(serverId, 'textDocument/didChange', {
       textDocument: {
@@ -217,13 +271,27 @@ function lspDidChange(serverId, filePath, content, version) {
       },
       contentChanges: [{ text: content }],
     });
-  }, DIDCHANGE_DEBOUNCE_MS));
+  };
+
+  didChangePending.set(key, {
+    timer: setTimeout(send, DIDCHANGE_DEBOUNCE_MS),
+    flush: send,
+  });
+}
+
+function flushDidChange(serverId, filePath) {
+  const key = `${serverId}:${filePath}`;
+  const pending = didChangePending.get(key);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pending.flush();
 }
 
 function lspDidClose(serverId, filePath) {
   const key = `${serverId}:${filePath}`;
-  clearTimeout(didChangeTimers.get(key));
-  didChangeTimers.delete(key);
+  const pending = didChangePending.get(key);
+  if (pending) clearTimeout(pending.timer);
+  didChangePending.delete(key);
 
   const uri = filePathToUri(filePath);
   console.log(`[LSP-bridge] didClose: serverId=${serverId} uri=${uri}`);

@@ -277,12 +277,17 @@ async function startServer(sender, { groupId, rootDir, serverKey }) {
             },
             completion: {
               dynamicRegistration: false,
+              contextSupport: true,
               completionItem: {
                 snippetSupport: false,
                 commitCharactersSupport: true,
                 documentationFormat: ['plaintext', 'markdown'],
                 deprecatedSupport: true,
                 preselectSupport: true,
+                labelDetailsSupport: true,
+                resolveSupport: {
+                  properties: ['documentation', 'detail'],
+                },
               },
             },
             hover: {
