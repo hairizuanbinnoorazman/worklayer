@@ -11,32 +11,57 @@ Inspired by [Niri](https://wiki.archlinux.org/title/Niri)'s scrollable tiling wi
 - **Terminal panels** — persistent shell sessions powered by xterm.js and node-pty
 - **File panels** — file browser + Monaco code editor with syntax highlighting
 - **Templates** — save and reuse workspace configurations
+- **Profiles** — segment workspaces into isolated profiles, each with its own templates and URL history; profile selector in sidebar with add/rename/delete
 - **Panel reordering** — drag panels to reorder within a workspace
 - **Drag-to-resize** — adjust panel widths with drag handles
+- **Improved resize UX** — wider drag handles, rAF-throttled updates, double-click to expand 2x, auto-scroll when dragging near edges
+- **Per-panel settings** — gear icon on each panel opens type-specific settings (working directory, startup command, URL, root directory)
+- **Open links as panels** — target="_blank", window.open(), and Cmd+Click in web panels open as new panels instead of external browser
+- **Terminal browser interception** — OAuth flows and CLI-opened URLs (e.g. `gh auth login`) open as adjacent web panels instead of system browser
+- **Panel search** — Ctrl+F / Cmd+F find-in-page for web panels
+- **Terminal search** — search within terminal output via xterm addon-search
+- **LSP integration** — Language Server Protocol support in the file editor (completions, diagnostics, hover) with per-workspace server configuration
+- **HTTP auth modal** — native dialog for HTTP Basic/Proxy authentication in web panels
+- **URL frequency tracking** — URL bar suggestions sorted by visit count with weekly decay
+- **Resizable sidebar** — drag the sidebar edge to resize (150-500px), persists across sessions
 - **Status bar** — real-time panel counts and limits display
 - **DOM caching** — smart caching prevents terminal re-initialization when switching workspaces
 - **Auto-saved state** — workspace layout and panel state persist across restarts
+- **MCP server** — built-in Model Context Protocol server for programmatic browser control via Chrome DevTools Protocol (click, type, screenshot, navigate, etc.)
 
 ## Project Structure
 
 ```
 worklayer/
-├── main.js               Electron main process
-├── preload.js            IPC bridge (contextBridge)
+├── main.js                        Electron main process
+├── preload.js                     IPC bridge (contextBridge)
 ├── package.json
-└── renderer/
-    ├── index.html        App shell
-    ├── styles.css        Dark theme styles
-    ├── app.js            State management and core operations
-    ├── sidebar.js        Workspace sidebar component
-    ├── panel-strip.js    Horizontal panel area component
-    ├── web-panel.js      Web panel (webview) component
-    ├── term-panel.js     Terminal panel (xterm.js) component
-    ├── file-panel.js     File browser + Monaco editor component
-    ├── workspace-modal.js Modal for creating/configuring workspaces
-    ├── status-bar.js     Panel count status indicator
-    ├── group-cache.js    DOM caching mechanism
-    └── panel-drag.js     Drag-to-resize and reorder handles
+├── renderer/
+│   ├── index.html                 App shell
+│   ├── styles.css                 Dark theme styles
+│   ├── app.js                     State management and core operations
+│   ├── sidebar.js                 Workspace sidebar component
+│   ├── panel-strip.js             Horizontal panel area component
+│   ├── web-panel.js               Web panel (webview) component
+│   ├── term-panel.js              Terminal panel (xterm.js) component
+│   ├── file-panel.js              File browser + Monaco editor component
+│   ├── workspace-modal.js         Modal for creating/configuring workspaces
+│   ├── panel-settings-modal.js    Per-panel settings modal
+│   ├── panel-search.js            Web panel find-in-page search
+│   ├── auth-modal.js              HTTP auth dialog
+│   ├── lsp-bridge.js              LSP client bridge for Monaco
+│   ├── lsp-settings-modal.js      Per-workspace LSP config modal
+│   ├── browser-intercept.js       Terminal browser open interception
+│   ├── status-bar.js              Panel count status indicator
+│   ├── group-cache.js             DOM caching mechanism
+│   └── panel-drag.js              Drag-to-resize and reorder handles
+├── mcp-server/
+│   ├── package.json               MCP server dependencies
+│   ├── index.js                   MCP server entry point
+│   ├── cdp-client.js              Chrome DevTools Protocol client
+│   ├── element.js                 Element interaction helpers
+│   └── snapshot.js                Page snapshot utilities
+└── docs/                          Implementation notes and learnings
 ```
 
 ## Dependencies
@@ -47,8 +72,10 @@ worklayer/
 | `node-pty` ^1.0 | Native pseudoterminal (requires rebuild for Electron) |
 | `@xterm/xterm` ^6 | Terminal UI in the renderer |
 | `@xterm/addon-fit` ^0.11 | Resizes xterm to fill its container |
+| `@xterm/addon-search` ^0.16 | Search within terminal output |
 | `monaco-editor` ^0.55 | Code editor and syntax highlighting |
 | `@electron/rebuild` ^4 | Rebuilds native modules for the installed Electron version |
+| `@modelcontextprotocol/sdk` ^1.27 | MCP server (in mcp-server/) |
 
 ## Setup
 
@@ -58,3 +85,12 @@ node node_modules/electron/install.js        # download Electron binary
 npm run rebuild-pty                          # rebuild node-pty for Electron
 npm start
 ```
+
+### MCP Server
+
+The built-in MCP server allows external tools to control web panels programmatically via CDP. To start the server alongside the app, set the following environment variables:
+
+| Variable | Description |
+|---|---|
+| `WORKLAYER_MCP_PORT` | Port the MCP server listens on |
+| `WORKLAYER_MCP_TOKEN` | Bearer token for authenticating requests |
