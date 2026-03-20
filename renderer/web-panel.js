@@ -335,10 +335,13 @@ function renderWebPanel(panel, container) {
     // Update the title in URL history for this URL
     const currentUrl = urlInput.value;
     if (e.title && currentUrl) {
-      const entry = state.urlHistory.find(h => h.url === currentUrl);
-      if (entry) {
-        entry.title = e.title;
-        saveState();
+      const profile = getActiveProfile();
+      if (profile) {
+        const entry = profile.urlHistory.find(h => h.url === currentUrl);
+        if (entry) {
+          entry.title = e.title;
+          saveState();
+        }
       }
     }
   });

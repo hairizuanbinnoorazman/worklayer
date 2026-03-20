@@ -11,7 +11,7 @@ const MAX_URL_HISTORY = 100;
 const MAX_URL_COUNT = 10;
 const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 
-let state = { activeGroupId: null, groups: [], templates: [], urlHistory: [] };
+let state = { activeProfileId: null, profiles: [] };
 
 // Map<panelId, { terminal, fitAddon, cleanup, termId }>
 const activeTerminals = new Map();
@@ -46,33 +46,78 @@ function setFocusedPanel(panelId) {
   }
 }
 
+function getActiveProfile() {
+  return state.profiles.find(p => p.id === state.activeProfileId) || null;
+}
+
+function getActiveGroupId() {
+  const profile = getActiveProfile();
+  return profile ? profile.activeGroupId : null;
+}
+
+function migrateProfile(profile) {
+  if (!profile.templates) profile.templates = [];
+  if (!profile.urlHistory) profile.urlHistory = [];
+  for (const entry of profile.urlHistory) {
+    if (!entry.count) entry.count = 1;
+    if (!entry.lastAccessed) entry.lastAccessed = entry.timestamp || Date.now();
+  }
+  for (const group of profile.groups) {
+    group.lspServers = group.lspServers || [];
+  }
+  if (!profile.groups.find(g => g.id === profile.activeGroupId)) {
+    profile.activeGroupId = profile.groups[0]?.id || null;
+  }
+}
+
 async function init() {
   const saved = await window.electronAPI.loadState();
-  if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
+
+  if (saved && Array.isArray(saved.profiles) && saved.profiles.length > 0) {
+    // New format
     state = saved;
     if (!state.maxCachedGroups || state.maxCachedGroups === 5) state.maxCachedGroups = 20;
-    if (!state.templates) state.templates = [];
-    if (!state.urlHistory) state.urlHistory = [];
     if (!state.sidebarWidth) state.sidebarWidth = 210;
-    // Migrate: ensure all URL history entries have count/lastAccessed
-    for (const entry of state.urlHistory) {
-      if (!entry.count) entry.count = 1;
-      if (!entry.lastAccessed) entry.lastAccessed = entry.timestamp || Date.now();
+    for (const profile of state.profiles) {
+      migrateProfile(profile);
     }
-    // Migrate: ensure all groups have lspServers
-    for (const group of state.groups) {
-      group.lspServers = group.lspServers || [];
+    if (!state.profiles.find(p => p.id === state.activeProfileId)) {
+      state.activeProfileId = state.profiles[0].id;
     }
-    if (!state.groups.find(g => g.id === state.activeGroupId)) {
-      state.activeGroupId = state.groups[0].id;
-    }
-  } else {
-    const id = generateId();
+  } else if (saved && Array.isArray(saved.groups) && saved.groups.length > 0) {
+    // Old format — wrap into a Default profile
+    const profileId = generateId();
+    const profile = {
+      id: profileId,
+      name: 'Default',
+      activeGroupId: saved.activeGroupId,
+      groups: saved.groups,
+      templates: saved.templates || [],
+      urlHistory: saved.urlHistory || [],
+    };
+    migrateProfile(profile);
     state = {
-      activeGroupId: id,
+      activeProfileId: profileId,
+      profiles: [profile],
+      maxCachedGroups: saved.maxCachedGroups || 20,
+      sidebarWidth: saved.sidebarWidth || 210,
+    };
+  } else {
+    // Fresh state
+    const groupId = generateId();
+    const profileId = generateId();
+    state = {
+      activeProfileId: profileId,
       maxCachedGroups: 20,
       sidebarWidth: 210,
-      groups: [{ id, label: 'Work 1', panels: [], lspServers: [] }],
+      profiles: [{
+        id: profileId,
+        name: 'Default',
+        activeGroupId: groupId,
+        groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
+        templates: [],
+        urlHistory: [],
+      }],
     };
   }
 
@@ -84,8 +129,9 @@ async function init() {
   window.addEventListener('resize', () => {
     clearTimeout(windowResizeTimer);
     windowResizeTimer = setTimeout(() => {
-      if (state.activeGroupId) {
-        fitVisibleTerminals(state.activeGroupId);
+      const activeGroupId = getActiveGroupId();
+      if (activeGroupId) {
+        fitVisibleTerminals(activeGroupId);
       }
     }, 100);
   });
@@ -103,21 +149,27 @@ function generateId() {
 }
 
 function getActiveGroup() {
-  return state.groups.find(g => g.id === state.activeGroupId) || null;
+  const profile = getActiveProfile();
+  if (!profile) return null;
+  return profile.groups.find(g => g.id === profile.activeGroupId) || null;
 }
 
 // ── Group operations ──────────────────────────────
 
 function addGroup() {
+  const profile = getActiveProfile();
+  if (!profile) return;
   const id = generateId();
-  state.groups.push({ id, label: `Work ${state.groups.length + 1}`, panels: [], lspServers: [] });
-  state.activeGroupId = id;
+  profile.groups.push({ id, label: `Work ${profile.groups.length + 1}`, panels: [], lspServers: [] });
+  profile.activeGroupId = id;
   saveState();
   renderSidebar();
   renderPanelStrip();
 }
 
 function addGroupWithPanels(name, panelConfigs) {
+  const profile = getActiveProfile();
+  if (!profile) return;
   const id = generateId();
   const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH };
 
@@ -139,42 +191,48 @@ function addGroupWithPanels(name, panelConfigs) {
     return panel;
   });
 
-  state.groups.push({ id, label: name || `Work ${state.groups.length + 1}`, panels, lspServers: [] });
-  state.activeGroupId = id;
+  profile.groups.push({ id, label: name || `Work ${profile.groups.length + 1}`, panels, lspServers: [] });
+  profile.activeGroupId = id;
   saveState();
   renderSidebar();
   renderPanelStrip(false);
 }
 
 function saveTemplate(name, panelConfigs) {
+  const profile = getActiveProfile();
+  if (!profile) return null;
   const template = {
     id: generateId(),
     name,
     panels: panelConfigs.map(config => ({ ...config })),
   };
-  state.templates.push(template);
+  profile.templates.push(template);
   saveState();
   return template;
 }
 
 function deleteTemplate(templateId) {
-  state.templates = state.templates.filter(t => t.id !== templateId);
+  const profile = getActiveProfile();
+  if (!profile) return;
+  profile.templates = profile.templates.filter(t => t.id !== templateId);
   saveState();
 }
 
 function deleteGroup(groupId) {
-  const group = state.groups.find(g => g.id === groupId);
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const group = profile.groups.find(g => g.id === groupId);
   if (group) killGroupTerminals(group);
   removeCachedGroup(groupId);
 
-  state.groups = state.groups.filter(g => g.id !== groupId);
+  profile.groups = profile.groups.filter(g => g.id !== groupId);
 
-  if (state.groups.length === 0) {
+  if (profile.groups.length === 0) {
     const id = generateId();
-    state.groups.push({ id, label: 'Work 1', panels: [], lspServers: [] });
+    profile.groups.push({ id, label: 'Work 1', panels: [], lspServers: [] });
   }
-  if (!state.groups.find(g => g.id === state.activeGroupId)) {
-    state.activeGroupId = state.groups[0].id;
+  if (!profile.groups.find(g => g.id === profile.activeGroupId)) {
+    profile.activeGroupId = profile.groups[0].id;
   }
 
   saveState();
@@ -183,7 +241,9 @@ function deleteGroup(groupId) {
 }
 
 function renameGroup(groupId, newLabel) {
-  const group = state.groups.find(g => g.id === groupId);
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const group = profile.groups.find(g => g.id === groupId);
   if (group && newLabel.trim()) {
     group.label = newLabel.trim();
     saveState();
@@ -192,9 +252,10 @@ function renameGroup(groupId, newLabel) {
 }
 
 function selectGroup(groupId) {
-  if (state.activeGroupId === groupId) return;
+  const profile = getActiveProfile();
+  if (!profile || profile.activeGroupId === groupId) return;
   setFocusedPanel(null);
-  state.activeGroupId = groupId;
+  profile.activeGroupId = groupId;
   saveState();
   renderSidebar();
   renderPanelStrip();
@@ -219,10 +280,12 @@ async function addPanel(type) {
   const group = getActiveGroup();
   if (!group) return;
 
+  const profile = getActiveProfile();
+  if (!profile) return;
   const maxLimits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
   const maxForType = maxLimits[type];
-  const globalCount = state.groups.flatMap(g => g.panels).filter(p => p.type === type).length;
-  if (maxForType && globalCount >= maxForType) return;
+  const profileCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === type).length;
+  if (maxForType && profileCount >= maxForType) return;
 
   let extraProps = {};
   if (type === 'web') {
@@ -244,7 +307,8 @@ async function addPanel(type) {
   group.panels.push(panel);
 
   // Surgically insert into cached DOM to avoid destroying existing terminals
-  const cached = getCachedContainer(state.activeGroupId);
+  const activeGId = getActiveGroupId();
+  const cached = getCachedContainer(activeGId);
   if (cached) {
     const addControls = cached.querySelector('.add-panel-controls');
     if (addControls) {
@@ -256,7 +320,7 @@ async function addPanel(type) {
       renderStatusBar();
     } else {
       // Was showing empty state — rebuild entirely
-      removeCachedGroup(state.activeGroupId);
+      removeCachedGroup(activeGId);
       renderPanelStrip();
     }
   } else {
@@ -270,8 +334,10 @@ function addWebPanelAt(url, insertIndex) {
   const group = getActiveGroup();
   if (!group) return;
 
-  const globalWebCount = state.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
-  if (globalWebCount >= MAX_WEB_PANELS) return;
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const profileWebCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
+  if (profileWebCount >= MAX_WEB_PANELS) return;
 
   const panel = {
     id: generateId(),
@@ -283,7 +349,8 @@ function addWebPanelAt(url, insertIndex) {
   const idx = Math.max(0, Math.min(insertIndex, group.panels.length));
   group.panels.splice(idx, 0, panel);
 
-  const cached = getCachedContainer(state.activeGroupId);
+  const activeGId = getActiveGroupId();
+  const cached = getCachedContainer(activeGId);
   if (cached) {
     const panelEls = cached.querySelectorAll('.panel');
     const addControls = cached.querySelector('.add-panel-controls');
@@ -297,7 +364,7 @@ function addWebPanelAt(url, insertIndex) {
       cached.insertBefore(panelEl, addControls);
       cached.insertBefore(resizeHandle, addControls);
     } else {
-      removeCachedGroup(state.activeGroupId);
+      removeCachedGroup(activeGId);
       renderPanelStrip();
       saveState();
       return;
@@ -346,7 +413,8 @@ function removePanel(panelId) {
   group.panels = group.panels.filter(p => p.id !== panelId);
 
   // Surgically remove from cached DOM to avoid destroying existing terminals
-  const cached = getCachedContainer(state.activeGroupId);
+  const activeGId = getActiveGroupId();
+  const cached = getCachedContainer(activeGId);
   if (cached && group.panels.length > 0) {
     const panelEl = cached.querySelector(`[data-panel-id="${panelId}"]`);
     if (panelEl) {
@@ -360,7 +428,7 @@ function removePanel(panelId) {
     renderStatusBar();
   } else {
     // Group is empty or no cache — rebuild
-    removeCachedGroup(state.activeGroupId);
+    removeCachedGroup(activeGId);
     renderPanelStrip();
   }
 
@@ -468,27 +536,31 @@ function rebuildFilePanel(panelId, panel) {
 
 function addToUrlHistory(url, title) {
   if (!url || url === 'about:blank' || url.startsWith('data:')) return;
-  const idx = state.urlHistory.findIndex(e => e.url === url);
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const idx = profile.urlHistory.findIndex(e => e.url === url);
   if (idx !== -1) {
-    const entry = state.urlHistory[idx];
+    const entry = profile.urlHistory[idx];
     entry.count = Math.min((entry.count || 1) + 1, MAX_URL_COUNT);
     entry.lastAccessed = Date.now();
     if (title) entry.title = title;
-    state.urlHistory.splice(idx, 1);
-    state.urlHistory.unshift(entry);
+    profile.urlHistory.splice(idx, 1);
+    profile.urlHistory.unshift(entry);
   } else {
-    state.urlHistory.unshift({ url, title: title || '', timestamp: Date.now(), count: 1, lastAccessed: Date.now() });
+    profile.urlHistory.unshift({ url, title: title || '', timestamp: Date.now(), count: 1, lastAccessed: Date.now() });
   }
-  if (state.urlHistory.length > MAX_URL_HISTORY) {
-    state.urlHistory = state.urlHistory.slice(0, MAX_URL_HISTORY);
+  if (profile.urlHistory.length > MAX_URL_HISTORY) {
+    profile.urlHistory = profile.urlHistory.slice(0, MAX_URL_HISTORY);
   }
   saveState();
 }
 
 function getFilteredUrlHistory(query) {
   applyUrlHistoryDecay();
+  const profile = getActiveProfile();
+  if (!profile) return [];
   const q = (query || '').toLowerCase().trim();
-  let results = state.urlHistory;
+  let results = profile.urlHistory;
   if (q) {
     results = results.filter(e => e.url.toLowerCase().includes(q) || (e.title && e.title.toLowerCase().includes(q)));
   }
@@ -505,8 +577,10 @@ function applyUrlHistoryDecay() {
   const now = Date.now();
   if (now - lastDecayCheck < 60000) return;
   lastDecayCheck = now;
+  const profile = getActiveProfile();
+  if (!profile) return;
   let changed = false;
-  state.urlHistory = state.urlHistory.filter(entry => {
+  profile.urlHistory = profile.urlHistory.filter(entry => {
     const lastAccessed = entry.lastAccessed || entry.timestamp || 0;
     const weeks = Math.floor((now - lastAccessed) / URL_DECAY_INTERVAL_MS);
     if (weeks > 0) {
@@ -517,6 +591,103 @@ function applyUrlHistoryDecay() {
     return true;
   });
   if (changed) saveState();
+}
+
+// ── Profile operations ────────────────────────────
+
+function teardownCurrentProfile() {
+  const profile = getActiveProfile();
+  if (!profile) return;
+
+  // Kill all terminals and editors in every group of the current profile
+  for (const group of profile.groups) {
+    killGroupTerminals(group);
+  }
+
+  // Clear DOM cache
+  groupDOMCache.forEach((el) => el.remove());
+  groupDOMCache.clear();
+  lruOrder.length = 0;
+
+  // Clear active maps
+  activeTerminals.clear();
+  activeEditors.clear();
+  activeLspServers.clear();
+
+  // Destroy all panel searches
+  for (const [panelId] of activePanelSearches) {
+    destroyPanelSearch(panelId);
+  }
+
+  // Clear webview registry
+  webviewRegistry.clear();
+
+  // Disconnect LSP
+  if (typeof disconnectAllLsp === 'function') disconnectAllLsp();
+
+  // Reset focus
+  setFocusedPanel(null);
+}
+
+function addProfile(name) {
+  const groupId = generateId();
+  const profileId = generateId();
+  const profile = {
+    id: profileId,
+    name: name || 'New Profile',
+    activeGroupId: groupId,
+    groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
+    templates: [],
+    urlHistory: [],
+  };
+
+  teardownCurrentProfile();
+  state.profiles.push(profile);
+  state.activeProfileId = profileId;
+  saveState();
+  renderSidebar();
+  renderPanelStrip();
+}
+
+function switchProfile(profileId) {
+  if (state.activeProfileId === profileId) return;
+  if (!state.profiles.find(p => p.id === profileId)) return;
+
+  teardownCurrentProfile();
+  state.activeProfileId = profileId;
+  saveState();
+  renderSidebar();
+  renderPanelStrip();
+}
+
+function renameProfile(profileId, newName) {
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (profile && newName.trim()) {
+    profile.name = newName.trim();
+    saveState();
+    renderSidebar();
+  }
+}
+
+function deleteProfile(profileId) {
+  if (state.profiles.length <= 1) return;
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (!profile) return;
+
+  // If deleting active profile, switch to another first
+  if (state.activeProfileId === profileId) {
+    const other = state.profiles.find(p => p.id !== profileId);
+    if (other) switchProfile(other.id);
+  }
+
+  // Now teardown and remove
+  for (const group of profile.groups) {
+    killGroupTerminals(group);
+    removeCachedGroup(group.id);
+  }
+  state.profiles = state.profiles.filter(p => p.id !== profileId);
+  saveState();
+  renderSidebar();
 }
 
 // ── Global Cmd+F / Ctrl+F handler ────────────────

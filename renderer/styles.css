@@ -46,6 +46,89 @@ body {
   background: #533483;
 }
 
+/* ── Profile selector ─────────────────────────────── */
+
+.profile-section {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 6px;
+  gap: 6px;
+  border-bottom: 1px solid #0f3460;
+  flex-shrink: 0;
+}
+
+.profile-select {
+  flex: 1;
+  background: #12121e;
+  border: 1px solid #334;
+  color: #ccc;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.profile-select:focus {
+  border-color: #533483;
+}
+
+.profile-rename-input {
+  flex: 1;
+  background: #0f3460;
+  border: 1px solid #533483;
+  color: #e0e0e0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.profile-action-btn {
+  background: none;
+  border: 1px solid #334;
+  color: #889;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  transition: all 0.12s;
+}
+
+.profile-action-btn:hover {
+  border-color: #533483;
+  color: #ccc;
+  background: #1e1e3e;
+}
+
+.profile-action-btn-danger:hover {
+  color: #ff6b6b;
+  background: #3a1a1a;
+  border-color: #833;
+}
+
+.profile-action-btn-disabled {
+  opacity: 0.3;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ── Status bar profile label ────────────────────── */
+
+.status-bar-profile {
+  color: #e0d0ff;
+  font-weight: 600;
+}
+
 .sidebar-title {
   padding: 14px 12px 10px;
   font-size: 10px;

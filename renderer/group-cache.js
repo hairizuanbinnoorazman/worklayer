@@ -24,7 +24,8 @@ function evictLRU() {
       el.remove();
       groupDOMCache.delete(evictId);
     }
-    const group = state.groups.find(g => g.id === evictId);
+    const profile = getActiveProfile();
+    const group = profile ? profile.groups.find(g => g.id === evictId) : null;
     if (group) killGroupTerminals(group);
     evicted = true;
   }
@@ -53,7 +54,8 @@ function removeCachedGroup(groupId) {
 }
 
 function fitVisibleTerminals(groupId) {
-  const group = state.groups.find(g => g.id === groupId);
+  const profile = getActiveProfile();
+  const group = profile ? profile.groups.find(g => g.id === groupId) : null;
   if (!group) return;
   group.panels.forEach(p => {
     if (p.type === 'terminal' && activeTerminals.has(p.id)) {

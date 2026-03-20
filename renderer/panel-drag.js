@@ -53,7 +53,7 @@ function onDragMove(e) {
     const indicator = document.createElement('div');
     indicator.className = 'drop-indicator';
     dragState.indicator = indicator;
-    const container = getCachedContainer(state.activeGroupId);
+    const container = getCachedContainer(getActiveGroupId());
     (container || document.getElementById('panel-strip')).appendChild(indicator);
 
     startAutoScroll();
@@ -65,7 +65,7 @@ function onDragMove(e) {
 function updateDropIndicator() {
   if (!dragState || !dragState.started) return;
 
-  const container = getCachedContainer(state.activeGroupId);
+  const container = getCachedContainer(getActiveGroupId());
   const scope = container || document.getElementById('panel-strip');
   const panels = Array.from(scope.querySelectorAll('.panel:not(.dragging)'));
 
@@ -148,7 +148,7 @@ function onDragEnd() {
       dragState.indicator.remove();
     }
 
-    const container = getCachedContainer(state.activeGroupId);
+    const container = getCachedContainer(getActiveGroupId());
     const scope = container || document.getElementById('panel-strip');
     const panelEl = dragState.panelEl;
     const panelId = panelEl.dataset.panelId;
@@ -200,7 +200,7 @@ function syncPanelOrder() {
   const group = getActiveGroup();
   if (!group) return;
 
-  const container = getCachedContainer(state.activeGroupId);
+  const container = getCachedContainer(getActiveGroupId());
   const scope = container || document.getElementById('panel-strip');
   const domPanelIds = Array.from(scope.querySelectorAll('[data-panel-id]'))
     .map(el => el.dataset.panelId);
