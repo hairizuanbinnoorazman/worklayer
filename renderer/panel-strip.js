@@ -1,5 +1,16 @@
 // panel-strip.js - Panel strip and resize handles with group DOM caching
 
+const RESIZE_AUTO_SCROLL_EDGE_PX = 60;
+const RESIZE_AUTO_SCROLL_MAX_SPEED = 15;
+let resizeAutoScrollRafId = null;
+
+function stopResizeAutoScroll() {
+  if (resizeAutoScrollRafId != null) {
+    cancelAnimationFrame(resizeAutoScrollRafId);
+    resizeAutoScrollRafId = null;
+  }
+}
+
 // Clear focus when clicking empty area of the panel strip
 document.addEventListener('DOMContentLoaded', () => {
   const strip = document.getElementById('panel-strip');
@@ -191,6 +202,9 @@ function createResizeHandle(panelId) {
 
     let latestWidth = startWidth;
     let rafId = null;
+    let accumulatedScrollDelta = 0;
+    let lastClientX = e.clientX;
+    const strip = document.getElementById('panel-strip');
 
     const applyDOM = () => {
       const container = getCachedContainer(getActiveGroupId());
@@ -214,8 +228,36 @@ function createResizeHandle(panelId) {
       rafId = null;
     };
 
+    function resizeAutoScrollTick() {
+      if (!strip) { stopResizeAutoScroll(); return; }
+      const rect = strip.getBoundingClientRect();
+      let scrollDelta = 0;
+
+      if (lastClientX > rect.right - RESIZE_AUTO_SCROLL_EDGE_PX) {
+        const depth = lastClientX - (rect.right - RESIZE_AUTO_SCROLL_EDGE_PX);
+        scrollDelta = (depth / RESIZE_AUTO_SCROLL_EDGE_PX) * RESIZE_AUTO_SCROLL_MAX_SPEED;
+      }
+
+      if (scrollDelta > 0) {
+        const oldScrollLeft = strip.scrollLeft;
+        const maxScroll = strip.scrollWidth - strip.clientWidth;
+        strip.scrollLeft = Math.min(maxScroll, oldScrollLeft + scrollDelta);
+        const actualDelta = strip.scrollLeft - oldScrollLeft;
+        if (actualDelta > 0) {
+          accumulatedScrollDelta += actualDelta;
+          latestWidth = Math.max(300, startWidth + (lastClientX - startX) + accumulatedScrollDelta);
+          updatePanelWidth(panelId, latestWidth);
+          if (!rafId) rafId = requestAnimationFrame(applyDOM);
+        }
+      }
+      resizeAutoScrollRafId = requestAnimationFrame(resizeAutoScrollTick);
+    }
+
+    resizeAutoScrollRafId = requestAnimationFrame(resizeAutoScrollTick);
+
     const onMove = e => {
-      latestWidth = Math.max(300, startWidth + (e.clientX - startX));
+      lastClientX = e.clientX;
+      latestWidth = Math.max(300, startWidth + (e.clientX - startX) + accumulatedScrollDelta);
       updatePanelWidth(panelId, latestWidth);
 
       if (!rafId) {
@@ -224,6 +266,7 @@ function createResizeHandle(panelId) {
     };
 
     const onUp = () => {
+      stopResizeAutoScroll();
       handle.classList.remove('active');
       document.body.classList.remove('resizing');
       document.removeEventListener('mousemove', onMove);
