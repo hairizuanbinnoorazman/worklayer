@@ -170,6 +170,9 @@ function renderFilePanel(panel, container) {
     } else {
       setDirty(false);
       updateGitDecorations();
+      for (const sid of panelLspServerIds) {
+        lspDidSave(sid, currentFilePath, content);
+      }
     }
   }
 
@@ -233,6 +236,7 @@ function renderFilePanel(panel, container) {
       return;
     }
 
+    const previousFilePath = currentFilePath;
     currentFilePath = filePath;
     panel.openFile = filePath;
     saveState();
@@ -298,9 +302,9 @@ function renderFilePanel(panel, container) {
       requestAnimationFrame(() => currentEditor.layout());
     } else {
       // Close old file in LSP servers
-      if (currentFilePath && currentFilePath !== filePath) {
+      if (previousFilePath && previousFilePath !== filePath) {
         for (const sid of panelLspServerIds) {
-          lspDidClose(sid, currentFilePath);
+          lspDidClose(sid, previousFilePath);
         }
       }
 
