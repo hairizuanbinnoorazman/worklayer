@@ -287,6 +287,15 @@ function flushDidChange(serverId, filePath) {
   pending.flush();
 }
 
+function lspDidSave(serverId, filePath, content) {
+  flushDidChange(serverId, filePath);
+  const uri = filePathToUri(filePath);
+  window.electronAPI.lspSendNotification(serverId, 'textDocument/didSave', {
+    textDocument: { uri },
+    text: content,
+  });
+}
+
 function lspDidClose(serverId, filePath) {
   const key = `${serverId}:${filePath}`;
   const pending = didChangePending.get(key);
