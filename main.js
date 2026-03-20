@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, session, webContents, Menu, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
@@ -51,6 +52,14 @@ let browserInterceptServer = null;
 let browserInterceptPort = 0;
 const browserInterceptToken = crypto.randomBytes(16).toString('hex');
 let browserHelperDir = null;
+
+function execFilePromise(command, args, options) {
+  return new Promise((resolve) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      resolve({ error, stdout, stderr });
+    });
+  });
+}
 
 function saveSessionCookies() {
   if (!cookieBackupFile) return;
@@ -221,6 +230,121 @@ ipcMain.handle('fs:writeFile', (_, { filePath, content }) => {
   } catch (e) {
     return { error: e.message };
   }
+});
+
+// Git diff IPC handler
+ipcMain.handle('git:diff', async (_, { filePath }) => {
+  const execOpts = { timeout: 5000, maxBuffer: 5 * 1024 * 1024 };
+  const cwd = path.dirname(filePath);
+
+  // Check if inside a git repo
+  const topLevel = await execFilePromise('git', ['rev-parse', '--show-toplevel'], { ...execOpts, cwd });
+  if (topLevel.error) return { changes: [] };
+
+  // Check if there are any commits
+  const headCheck = await execFilePromise('git', ['rev-parse', 'HEAD'], { ...execOpts, cwd });
+  if (headCheck.error) {
+    // No commits yet — treat entire file as added
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lineCount = content.split('\n').length;
+    if (lineCount > 0) {
+      return { changes: [{ type: 'added', startLine: 1, endLine: lineCount }] };
+    }
+    return { changes: [] };
+  }
+
+  // Check if file is tracked
+  const lsFiles = await execFilePromise('git', ['ls-files', '--error-unmatch', filePath], { ...execOpts, cwd });
+  if (lsFiles.error) {
+    // Untracked file — all lines are added
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const lineCount = content.split('\n').length;
+      if (lineCount > 0) {
+        return { changes: [{ type: 'added', startLine: 1, endLine: lineCount }] };
+      }
+    } catch (_e) {}
+    return { changes: [] };
+  }
+
+  // Run git diff HEAD
+  const diff = await execFilePromise('git', ['diff', 'HEAD', '--', filePath], { ...execOpts, cwd });
+  if (!diff.stdout) return { changes: [] };
+
+  // Parse unified diff
+  const lines = diff.stdout.split('\n');
+  const rawChanges = [];
+
+  let newLine = 0;
+  for (const line of lines) {
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      newLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+
+    if (!newLine) continue;
+
+    if (line.startsWith('+')) {
+      rawChanges.push({ type: 'added', line: newLine });
+      newLine++;
+    } else if (line.startsWith('-')) {
+      rawChanges.push({ type: 'deleted', line: newLine });
+      // deleted lines don't advance newLine
+    } else if (!line.startsWith('\\')) {
+      newLine++;
+    }
+  }
+
+  // Classify: consecutive added after deleted = modified
+  const classified = [];
+  let i = 0;
+  while (i < rawChanges.length) {
+    if (rawChanges[i].type === 'deleted') {
+      // Collect consecutive deleted
+      const delStart = i;
+      while (i < rawChanges.length && rawChanges[i].type === 'deleted') i++;
+      const delCount = i - delStart;
+
+      // Collect consecutive added that follow
+      const addStart = i;
+      while (i < rawChanges.length && rawChanges[i].type === 'added') i++;
+      const addCount = i - addStart;
+
+      // Pair up as modified
+      const modCount = Math.min(delCount, addCount);
+      for (let j = 0; j < modCount; j++) {
+        classified.push({ type: 'modified', line: rawChanges[addStart + j].line });
+      }
+
+      // Remaining added
+      for (let j = modCount; j < addCount; j++) {
+        classified.push({ type: 'added', line: rawChanges[addStart + j].line });
+      }
+
+      // Remaining deleted (marker at the current new-file position)
+      if (delCount > modCount) {
+        const markerLine = addCount > 0 ? rawChanges[addStart + addCount - 1].line : rawChanges[delStart].line;
+        classified.push({ type: 'deleted', line: markerLine });
+      }
+    } else {
+      classified.push(rawChanges[i]);
+      i++;
+    }
+  }
+
+  // Consolidate consecutive same-type entries into ranges
+  const changes = [];
+  for (const entry of classified) {
+    const last = changes[changes.length - 1];
+    if (last && last.type === entry.type && entry.line === last.endLine + 1) {
+      last.endLine = entry.line;
+    } else {
+      changes.push({ type: entry.type, startLine: entry.line, endLine: entry.line });
+    }
+  }
+
+  return { changes };
 });
 
 // Debug cookie inspection for persist:webpanels partition
