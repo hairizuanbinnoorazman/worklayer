@@ -342,7 +342,12 @@ body {
   flex-shrink: 0;
   min-width: 300px;
   contain: layout style paint;
+  transition: width 0.2s ease-out;
 }
+
+body.resizing .panel { transition: none; }
+body.resizing webview, body.resizing iframe { pointer-events: none !important; }
+body.resizing, body.resizing * { cursor: col-resize !important; }
 
 .panel-focused {
   box-shadow: 0 0 12px 2px rgba(83, 52, 131, 0.35);
@@ -484,19 +489,32 @@ body {
 /* ── Resize handle ───────────────────────────────── */
 
 .resize-handle {
-  width: 6px;
-  min-width: 6px;
+  width: 12px;
+  min-width: 12px;
   cursor: col-resize;
   background: transparent;
   align-self: stretch;
   border-radius: 3px;
-  margin: 8px 3px;
-  transition: background 0.15s;
+  margin: 8px 0;
   flex-shrink: 0;
+  position: relative;
 }
 
-.resize-handle:hover,
-.resize-handle.active { background: #533483; }
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 4px;
+  transform: translateX(-50%);
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover::after,
+.resize-handle.active::after { background: #533483; }
 
 /* ── Add panel controls ──────────────────────────── */
 

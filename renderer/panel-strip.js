@@ -187,16 +187,17 @@ function createResizeHandle(panelId) {
     startWidth = panel.width;
 
     handle.classList.add('active');
+    document.body.classList.add('resizing');
 
-    const onMove = e => {
-      const newWidth = Math.max(300, startWidth + (e.clientX - startX));
-      updatePanelWidth(panelId, newWidth);
+    let latestWidth = startWidth;
+    let rafId = null;
 
+    const applyDOM = () => {
       const container = getCachedContainer(getActiveGroupId());
       const panelEl = container
         ? container.querySelector(`[data-panel-id="${panelId}"]`)
         : document.querySelector(`[data-panel-id="${panelId}"]`);
-      if (panelEl) panelEl.style.width = newWidth + 'px';
+      if (panelEl) panelEl.style.width = latestWidth + 'px';
 
       if (activeTerminals.has(panelId)) {
         const { fitAddon } = activeTerminals.get(panelId);
@@ -210,17 +211,69 @@ function createResizeHandle(panelId) {
           try { editor.layout(); } catch (e) {}
         }
       }
+      rafId = null;
+    };
+
+    const onMove = e => {
+      latestWidth = Math.max(300, startWidth + (e.clientX - startX));
+      updatePanelWidth(panelId, latestWidth);
+
+      if (!rafId) {
+        rafId = requestAnimationFrame(applyDOM);
+      }
     };
 
     const onUp = () => {
       handle.classList.remove('active');
+      document.body.classList.remove('resizing');
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      applyDOM();
       saveState();
     };
 
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  });
+
+  handle.addEventListener('dblclick', e => {
+    e.preventDefault();
+    const group = getActiveGroup();
+    const panel = group.panels.find(p => p.id === panelId);
+    if (!panel) return;
+
+    const strip = document.getElementById('panel-strip');
+    const maxWidth = strip.clientWidth - 40;
+    const newWidth = Math.min(panel.width * 2, maxWidth);
+    updatePanelWidth(panelId, newWidth);
+
+    const container = getCachedContainer(getActiveGroupId());
+    const panelEl = container
+      ? container.querySelector(`[data-panel-id="${panelId}"]`)
+      : document.querySelector(`[data-panel-id="${panelId}"]`);
+    if (panelEl) {
+      panelEl.style.width = newWidth + 'px';
+      panelEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest' });
+    }
+
+    if (activeTerminals.has(panelId)) {
+      const { fitAddon } = activeTerminals.get(panelId);
+      if (fitAddon) {
+        try { fitAddon.fit(); } catch (e) {}
+      }
+    }
+    if (activeEditors.has(panelId)) {
+      const { editor } = activeEditors.get(panelId);
+      if (editor) {
+        try { editor.layout(); } catch (e) {}
+      }
+    }
+
+    saveState();
   });
 
   return handle;
