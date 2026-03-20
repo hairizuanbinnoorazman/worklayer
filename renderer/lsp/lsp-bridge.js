@@ -8,6 +8,26 @@ const didChangePending = new Map();
 
 const DIDCHANGE_DEBOUNCE_MS = 300;
 
+// Global file error tracking for tree coloring
+// Map<filePath, errorCount>
+const fileErrorMap = new Map();
+const diagnosticChangeCallbacks = new Set();
+
+function onDiagnosticChange(callback) {
+  diagnosticChangeCallbacks.add(callback);
+  return () => diagnosticChangeCallbacks.delete(callback);
+}
+
+function getFileErrorMap() {
+  return fileErrorMap;
+}
+
+function notifyDiagnosticChange() {
+  for (const cb of diagnosticChangeCallbacks) {
+    try { cb(); } catch (_) {}
+  }
+}
+
 // --- LSP <-> Monaco coordinate mapping ---
 // LSP: 0-based line/char, Monaco: 1-based line/column
 
@@ -85,6 +105,15 @@ function handleDiagnostics(serverKey, params) {
 
   console.log(`[LSP-bridge] setting ${markers.length} markers for ${serverKey} on ${filePath}`);
   monaco.editor.setModelMarkers(model, serverKey, markers);
+
+  // Update global file error map
+  const errorCount = markers.filter(m => m.severity === 8).length;
+  if (errorCount > 0) {
+    fileErrorMap.set(filePath, errorCount);
+  } else {
+    fileErrorMap.delete(filePath);
+  }
+  notifyDiagnosticChange();
 }
 
 // --- Provider registration ---
@@ -342,6 +371,16 @@ function disconnectLspServer(serverId, serverKey) {
     for (const model of monaco.editor.getModels()) {
       monaco.editor.setModelMarkers(model, serverKey, []);
     }
+    // Recompute file error map from remaining markers
+    fileErrorMap.clear();
+    for (const model of monaco.editor.getModels()) {
+      const allMarkers = monaco.editor.getModelMarkers({ resource: model.uri });
+      const errors = allMarkers.filter(m => m.severity === 8).length;
+      if (errors > 0) {
+        fileErrorMap.set(model.uri.path, errors);
+      }
+    }
+    notifyDiagnosticChange();
   }
 }
 
