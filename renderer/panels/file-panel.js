@@ -152,6 +152,7 @@ function renderFilePanel(panel, container) {
   let isDirty = false;
   let activeTreeItem = null;
   let docVersion = 0;
+  let gitDecorationCollection = null;
   const panelLspServerIds = []; // track server IDs started for this panel
 
   function setDirty(dirty) {
@@ -168,10 +169,37 @@ function renderFilePanel(panel, container) {
       alert('Save failed: ' + result.error);
     } else {
       setDirty(false);
+      updateGitDecorations();
     }
   }
 
   saveBtn.addEventListener('click', saveFile);
+
+  async function updateGitDecorations() {
+    if (!currentFilePath || !currentEditor) {
+      if (gitDecorationCollection) {
+        gitDecorationCollection.clear();
+      }
+      return;
+    }
+    const targetPath = currentFilePath;
+    try {
+      const result = await window.electronAPI.gitDiff(targetPath);
+      if (currentFilePath !== targetPath) return; // stale response guard
+      const decorations = (result.changes || []).map(change => ({
+        range: new monaco.Range(change.startLine, 1, change.endLine, 1),
+        options: {
+          linesDecorationsClassName: `git-gutter-${change.type}`,
+        },
+      }));
+      if (gitDecorationCollection) {
+        gitDecorationCollection.clear();
+      }
+      gitDecorationCollection = currentEditor.createDecorationsCollection(decorations);
+    } catch (e) {
+      console.warn('[file-panel] git decoration error:', e);
+    }
+  }
 
   async function openFile(filePath) {
     if (isBinaryFile(filePath)) {
@@ -188,6 +216,9 @@ function renderFilePanel(panel, container) {
       }
       setDirty(false);
       currentFilePath = null;
+      if (gitDecorationCollection) {
+        gitDecorationCollection.clear();
+      }
       return;
     }
 
@@ -292,6 +323,7 @@ function renderFilePanel(panel, container) {
     }
 
     setDirty(false);
+    updateGitDecorations();
   }
 
   // Open the previously open file on restore

@@ -1308,3 +1308,22 @@ webview {
   transform: translateX(16px);
   background: #50fa7b;
 }
+
+/* Git gutter indicators */
+.git-gutter-added {
+  background: #50fa7b;
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.git-gutter-modified {
+  background: #8be9fd;
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.git-gutter-deleted {
+  background: #ff5555;
+  width: 3px !important;
+  margin-left: 3px;
+}
