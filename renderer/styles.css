@@ -1309,6 +1309,15 @@ webview {
   background: #50fa7b;
 }
 
+/* File tree color indicators */
+.tree-item.git-modified .tree-name { color: #e5c07b; }
+.tree-item.git-new .tree-name { color: #50fa7b; }
+.tree-item.has-errors .tree-name { color: #ff5555; }
+
+.tree-item.active.git-modified .tree-name { color: #f0d88a; }
+.tree-item.active.git-new .tree-name { color: #70ffaa; }
+.tree-item.active.has-errors .tree-name { color: #ff7777; }
+
 /* Git gutter indicators */
 .git-gutter-added {
   background: #50fa7b;

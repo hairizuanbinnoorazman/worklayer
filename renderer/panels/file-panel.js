@@ -154,6 +154,7 @@ function renderFilePanel(panel, container) {
   let docVersion = 0;
   let gitDecorationCollection = null;
   const panelLspServerIds = []; // track server IDs started for this panel
+  let cleanupDiagListener = null;
 
   function setDirty(dirty) {
     isDirty = dirty;
@@ -170,6 +171,7 @@ function renderFilePanel(panel, container) {
     } else {
       setDirty(false);
       updateGitDecorations();
+      applyTreeColors();
       for (const sid of panelLspServerIds) {
         lspDidSave(sid, currentFilePath, content);
       }
@@ -294,6 +296,7 @@ function renderFilePanel(panel, container) {
               lspDidClose(sid, currentFilePath);
             }
           }
+          if (cleanupDiagListener) cleanupDiagListener();
           currentEditor.dispose();
           activeEditors.delete(panel.id);
         },
@@ -358,6 +361,7 @@ function renderFilePanel(panel, container) {
       parentEl.appendChild(item);
 
       if (entry.isDirectory) {
+        item.dataset.path = dirPath + '/' + entry.name;
         const children = document.createElement('div');
         children.className = 'tree-children';
         children.hidden = true;
@@ -372,10 +376,12 @@ function renderFilePanel(panel, container) {
           if (!loaded) {
             loaded = true;
             await loadTreeEntries(dirPath + '/' + entry.name, children, depth + 1);
+            applyTreeColors();
           }
         });
       } else {
         const fullPath = dirPath + '/' + entry.name;
+        item.dataset.path = fullPath;
         item.addEventListener('click', (e) => {
           e.stopPropagation();
           if (activeTreeItem) activeTreeItem.classList.remove('active');
@@ -387,14 +393,114 @@ function renderFilePanel(panel, container) {
     });
   }
 
+  // --- Tree coloring for git status & diagnostics ---
+
+  async function applyTreeColors() {
+    if (!panel.rootDir) return;
+
+    const gitResult = await window.electronAPI.gitStatus(panel.rootDir);
+    const gitFiles = gitResult.files || {};
+    const errorMap = getFileErrorMap();
+
+    const allItems = treeContainer.querySelectorAll('.tree-item');
+    for (const item of allItems) {
+      item.classList.remove('git-modified', 'git-new', 'has-errors');
+    }
+
+    // Color file items
+    for (const item of allItems) {
+      const p = item.dataset.path;
+      if (!p) continue;
+
+      if (item.classList.contains('tree-file')) {
+        const hasError = errorMap.has(p);
+        const gitStatus = gitFiles[p];
+
+        if (hasError) {
+          item.classList.add('has-errors');
+        } else if (gitStatus === 'modified') {
+          item.classList.add('git-modified');
+        } else if (gitStatus === 'new') {
+          item.classList.add('git-new');
+        }
+      }
+    }
+
+    // Propagate to parent directories
+    // For each colored file, walk up through tree-children -> tree-directory
+    for (const item of allItems) {
+      if (!item.classList.contains('tree-file')) continue;
+      if (!item.classList.contains('git-modified') && !item.classList.contains('git-new') && !item.classList.contains('has-errors')) continue;
+
+      let el = item.parentElement;
+      while (el && el !== treeContainer) {
+        if (el.classList.contains('tree-children')) {
+          // The directory item is the previous sibling
+          const dirItem = el.previousElementSibling;
+          if (dirItem && dirItem.classList.contains('tree-directory')) {
+            // Apply highest priority: has-errors > git-modified > git-new
+            if (item.classList.contains('has-errors')) {
+              dirItem.classList.remove('git-modified', 'git-new');
+              dirItem.classList.add('has-errors');
+            } else if (item.classList.contains('git-modified') && !dirItem.classList.contains('has-errors')) {
+              dirItem.classList.remove('git-new');
+              dirItem.classList.add('git-modified');
+            } else if (item.classList.contains('git-new') && !dirItem.classList.contains('has-errors') && !dirItem.classList.contains('git-modified')) {
+              dirItem.classList.add('git-new');
+            }
+          }
+        }
+        el = el.parentElement;
+      }
+    }
+
+    // Color directories whose children haven't been loaded yet
+    for (const [absPath, status] of Object.entries(gitFiles)) {
+      if (status === 'deleted') continue;
+      // Find directory items that are ancestors of this path
+      const dirItems = treeContainer.querySelectorAll('.tree-item.tree-directory');
+      for (const dirItem of dirItems) {
+        const dirPath = dirItem.dataset.path;
+        if (!dirPath) continue;
+        if (absPath.startsWith(dirPath + '/')) {
+          if (status === 'modified' && !dirItem.classList.contains('has-errors')) {
+            dirItem.classList.remove('git-new');
+            dirItem.classList.add('git-modified');
+          } else if (status === 'new' && !dirItem.classList.contains('has-errors') && !dirItem.classList.contains('git-modified')) {
+            dirItem.classList.add('git-new');
+          }
+        }
+      }
+    }
+
+    // Also propagate errors for unloaded directories
+    for (const [filePath] of errorMap) {
+      const dirItems = treeContainer.querySelectorAll('.tree-item.tree-directory');
+      for (const dirItem of dirItems) {
+        const dirPath = dirItem.dataset.path;
+        if (!dirPath) continue;
+        if (filePath.startsWith(dirPath + '/')) {
+          dirItem.classList.remove('git-modified', 'git-new');
+          dirItem.classList.add('has-errors');
+        }
+      }
+    }
+  }
+
+  let applyTreeColorsTimer = null;
+  function scheduleApplyTreeColors() {
+    clearTimeout(applyTreeColorsTimer);
+    applyTreeColorsTimer = setTimeout(applyTreeColors, 200);
+  }
+
   if (panel.rootDir) {
-    loadTreeEntries(panel.rootDir, treeContainer, 0);
+    loadTreeEntries(panel.rootDir, treeContainer, 0).then(() => applyTreeColors());
   }
 
   refreshBtn.addEventListener('click', () => {
     treeContainer.innerHTML = '';
     if (panel.rootDir) {
-      loadTreeEntries(panel.rootDir, treeContainer, 0);
+      loadTreeEntries(panel.rootDir, treeContainer, 0).then(() => applyTreeColors());
     }
   });
 
@@ -556,6 +662,9 @@ function renderFilePanel(panel, container) {
   }
 
   autoStartLsp();
+
+  // Register diagnostic change listener for tree coloring
+  cleanupDiagListener = onDiagnosticChange(scheduleApplyTreeColors);
 
   // Internal sidebar resize
   let sidebarWidth = 220;

@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', { filePath, content }),
   gitDiff: (filePath) => ipcRenderer.invoke('git:diff', { filePath }),
+  gitStatus: (rootDir) => ipcRenderer.invoke('git:status', { rootDir }),
 
   // LSP
   lspGetRegistry: () => ipcRenderer.invoke('lsp:getRegistry'),

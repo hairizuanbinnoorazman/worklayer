@@ -347,6 +347,43 @@ ipcMain.handle('git:diff', async (_, { filePath }) => {
   return { changes };
 });
 
+// Git status IPC handler (for file tree coloring)
+ipcMain.handle('git:status', async (_, { rootDir }) => {
+  const execOpts = { timeout: 5000, maxBuffer: 1024 * 1024 };
+  try {
+    const topLevel = await execFilePromise('git', ['rev-parse', '--show-toplevel'], { ...execOpts, cwd: rootDir });
+    if (topLevel.error) return { files: {} };
+    const gitRoot = topLevel.stdout.trim();
+
+    const status = await execFilePromise('git', ['status', '--porcelain'], { ...execOpts, cwd: gitRoot });
+    if (status.error) return { files: {} };
+
+    const files = {};
+    for (const line of status.stdout.split('\n')) {
+      if (!line || line.length < 4) continue;
+      const xy = line.substring(0, 2);
+      const filePart = line.substring(3);
+      // Handle renames: "R  old -> new"
+      const relPath = filePart.includes(' -> ') ? filePart.split(' -> ')[1] : filePart;
+      const absPath = path.join(gitRoot, relPath);
+
+      if (xy === '??') {
+        files[absPath] = 'new';
+      } else if (xy === 'A ' || xy === 'AM') {
+        files[absPath] = 'new';
+      } else if (xy === 'D ' || xy === ' D') {
+        files[absPath] = 'deleted';
+      } else {
+        // M , MM,  M, etc.
+        files[absPath] = 'modified';
+      }
+    }
+    return { files };
+  } catch (e) {
+    return { files: {} };
+  }
+});
+
 // Debug cookie inspection for persist:webpanels partition
 ipcMain.handle('debug:getCookies', async (_, { url }) => {
   const ses = session.fromPartition('persist:webpanels');
