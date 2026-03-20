@@ -55,6 +55,8 @@ async function mountTerminal(panel, container) {
     rows: terminal.rows,
     cwd: panel.cwd || undefined,
     initialCommand: panel.initialCommand || undefined,
+    profileId: getActiveProfile()?.id,
+    groupId: getActiveGroupId(),
   });
 
   if (error) {

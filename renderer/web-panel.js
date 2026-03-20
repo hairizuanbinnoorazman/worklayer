@@ -216,6 +216,10 @@ function renderWebPanel(panel, container) {
         showPanelSearch(panel.id);
       },
     });
+    // Register webview with main process for CDP access
+    if (window.electronAPI.cdpRegisterWebview) {
+      window.electronAPI.cdpRegisterWebview(webview._webContentsId, panel.id, panel.url || '');
+    }
   });
 
   // Handle found-in-page results from findInPage
@@ -237,6 +241,9 @@ function renderWebPanel(panel, container) {
       urlInput.value = e.url;
       updatePanelUrl(panel.id, e.url);
       addToUrlHistory(e.url, '');
+      if (window.electronAPI.cdpUpdateWebview && webview._webContentsId) {
+        window.electronAPI.cdpUpdateWebview(webview._webContentsId, e.url, undefined);
+      }
     }
     if (window.electronAPI.debugGetCookieCount) {
       window.electronAPI.debugGetCookieCount().then(info => {
@@ -326,6 +333,10 @@ function renderWebPanel(panel, container) {
 
   webview.addEventListener('page-title-updated', e => {
     if (webview.getURL().startsWith('data:')) return;
+    // Update CDP tracking with new title
+    if (window.electronAPI.cdpUpdateWebview && webview._webContentsId) {
+      window.electronAPI.cdpUpdateWebview(webview._webContentsId, undefined, e.title);
+    }
     // Update the panel header label with the page title
     const panelEl = webview.closest('.panel');
     if (panelEl) {

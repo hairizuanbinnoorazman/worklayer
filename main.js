@@ -25,6 +25,10 @@ const capturingWebContents = new Set();
 let authRequestIdCounter = 0;
 const pendingAuthCallbacks = new Map();
 
+// Panel creation request tracking (MCP open_panel)
+let panelRequestIdCounter = 0;
+const pendingPanelCallbacks = new Map();
+
 let pty;
 try {
   pty = require('node-pty');
@@ -37,6 +41,10 @@ let cookieBackupFile;
 let cookieSaveInterval;
 const terminals = new Map();
 let termIdCounter = 0;
+
+// CDP webview tracking
+const webviewPanelMap = new Map(); // webContentsId -> { panelId, url, title }
+const attachedDebuggers = new Map(); // webContentsId -> true
 
 // Browser intercept: local HTTP server + helper scripts
 let browserInterceptServer = null;
@@ -102,7 +110,7 @@ ipcMain.handle('state:save', (_, state) => {
 });
 
 // Terminal IPC
-ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) => {
+ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand, profileId, groupId }) => {
   if (!pty) return { error: 'node-pty not available. Run: npm run postinstall' };
 
   const id = ++termIdCounter;
@@ -118,6 +126,12 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) =
     termEnv.BROWSER = path.join(browserHelperDir, 'worklayer-browser');
     termEnv.PATH = browserHelperDir + ':' + (termEnv.PATH || '');
   }
+  if (browserInterceptPort) {
+    termEnv.WORKLAYER_MCP_PORT = String(browserInterceptPort);
+    termEnv.WORKLAYER_MCP_TOKEN = browserInterceptToken;
+  }
+  if (profileId) termEnv.WORKLAYER_PROFILE_ID = String(profileId);
+  if (groupId) termEnv.WORKLAYER_GROUP_ID = String(groupId);
 
   const term = pty.spawn(shell, [], {
     name: 'xterm-256color',
@@ -303,6 +317,36 @@ ipcMain.on('auth:login-response', (_, { requestId, username, password, cancelled
   else callback(username, password);
 });
 
+// Panel creation response IPC (MCP open_panel)
+ipcMain.on('panel:create-response', (_, { requestId, panelId, error }) => {
+  const pending = pendingPanelCallbacks.get(requestId);
+  if (!pending) return;
+  pendingPanelCallbacks.delete(requestId);
+  clearTimeout(pending.timer);
+  if (error) pending.reject(new Error(error));
+  else pending.resolve({ panelId });
+});
+
+// CDP webview registration IPC
+ipcMain.on('cdp:register-webview', (_, { webContentsId, panelId, url, title }) => {
+  webviewPanelMap.set(webContentsId, { panelId, url: url || '', title: title || '' });
+  debugLog('[CDP] Registered webview wcId:', webContentsId, 'panelId:', panelId);
+});
+
+ipcMain.on('cdp:unregister-webview', (_, { webContentsId }) => {
+  webviewPanelMap.delete(webContentsId);
+  attachedDebuggers.delete(webContentsId);
+  debugLog('[CDP] Unregistered webview wcId:', webContentsId);
+});
+
+ipcMain.on('cdp:update-webview', (_, { webContentsId, url, title }) => {
+  const info = webviewPanelMap.get(webContentsId);
+  if (info) {
+    if (url !== undefined) info.url = url;
+    if (title !== undefined) info.title = title;
+  }
+});
+
 function setupBrowserHelperScripts() {
   browserHelperDir = path.join(app.getPath('userData'), 'browser-helpers');
   if (!fs.existsSync(browserHelperDir)) {
@@ -356,18 +400,25 @@ fi
   debugLog('[BrowserIntercept] Helper scripts written to', browserHelperDir);
 }
 
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => data += chunk);
+    req.on('end', () => {
+      try { resolve(JSON.parse(data)); }
+      catch (e) { reject(e); }
+    });
+    req.on('error', reject);
+  });
+}
+
 function startBrowserInterceptServer() {
   return new Promise((resolve, reject) => {
-    browserInterceptServer = http.createServer((req, res) => {
+    browserInterceptServer = http.createServer(async (req, res) => {
       try {
-        const url = new URL(req.url, `http://127.0.0.1`);
-        if (url.pathname !== '/open') {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
+        const parsedUrl = new URL(req.url, `http://127.0.0.1`);
+        const token = parsedUrl.searchParams.get('token');
 
-        const token = url.searchParams.get('token');
         if (token !== browserInterceptToken) {
           debugLog('[BrowserIntercept] Invalid token');
           res.writeHead(403);
@@ -375,27 +426,147 @@ function startBrowserInterceptServer() {
           return;
         }
 
-        const termId = url.searchParams.get('termId');
-        const openUrl = url.searchParams.get('url');
+        // --- /open: browser intercept from terminal ---
+        if (parsedUrl.pathname === '/open') {
+          const termId = parsedUrl.searchParams.get('termId');
+          const openUrl = parsedUrl.searchParams.get('url');
+          if (!openUrl) {
+            res.writeHead(400);
+            res.end();
+            return;
+          }
 
-        if (!openUrl) {
-          res.writeHead(400);
-          res.end();
+          debugLog('[BrowserIntercept] Open request: termId=', termId, 'url=', openUrl);
+          const wins = BrowserWindow.getAllWindows();
+          if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
+            wins[0].webContents.send('terminal:browser-open', {
+              termId: termId ? parseInt(termId, 10) : null,
+              url: openUrl,
+            });
+          }
+          res.writeHead(200);
+          res.end('ok');
           return;
         }
 
-        debugLog('[BrowserIntercept] Open request: termId=', termId, 'url=', openUrl);
-
-        const wins = BrowserWindow.getAllWindows();
-        if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
-          wins[0].webContents.send('terminal:browser-open', {
-            termId: termId ? parseInt(termId, 10) : null,
-            url: openUrl,
-          });
+        // --- /cdp/panels: list registered web panels ---
+        if (parsedUrl.pathname === '/cdp/panels') {
+          const panels = [];
+          for (const [wcId, info] of webviewPanelMap) {
+            const wc = webContents.fromId(wcId);
+            if (wc && !wc.isDestroyed()) {
+              panels.push({
+                webContentsId: wcId,
+                panelId: info.panelId,
+                url: info.url || wc.getURL(),
+                title: info.title || '',
+              });
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(panels));
+          return;
         }
 
-        res.writeHead(200);
-        res.end('ok');
+        // --- /cdp/command: send CDP command to a webview ---
+        if (parsedUrl.pathname === '/cdp/command' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId, method, params } = body;
+          const wc = webContents.fromId(wcId);
+          if (!wc || wc.isDestroyed()) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'webContents not found or destroyed' }));
+            return;
+          }
+
+          // Auto-attach debugger if needed
+          if (!attachedDebuggers.has(wcId)) {
+            try {
+              wc.debugger.attach('1.3');
+              attachedDebuggers.set(wcId, true);
+              await wc.debugger.sendCommand('Page.enable');
+              await wc.debugger.sendCommand('DOM.enable');
+              await wc.debugger.sendCommand('Accessibility.enable');
+              await wc.debugger.sendCommand('Network.enable');
+              debugLog('[CDP] Attached debugger to wcId:', wcId);
+            } catch (e) {
+              debugLog('[CDP] Attach error:', e.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to attach debugger: ' + e.message }));
+              return;
+            }
+          }
+
+          try {
+            const result = await wc.debugger.sendCommand(method, params || {});
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ result }));
+          } catch (e) {
+            debugLog('[CDP] Command error:', method, e.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e.message }));
+          }
+          return;
+        }
+
+        // --- /cdp/detach: detach CDP debugger from a webview ---
+        if (parsedUrl.pathname === '/cdp/detach' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          const wc = webContents.fromId(wcId);
+          if (wc && !wc.isDestroyed() && attachedDebuggers.has(wcId)) {
+            try { wc.debugger.detach(); } catch (e) {}
+            attachedDebuggers.delete(wcId);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // --- /open-panel: create a new web panel (MCP open_panel) ---
+        if (parsedUrl.pathname === '/open-panel' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { url: panelUrl, termId: reqTermId, profileId: reqProfileId, groupId: reqGroupId } = body;
+          if (!panelUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'url is required' }));
+            return;
+          }
+
+          const requestId = ++panelRequestIdCounter;
+          try {
+            const result = await new Promise((resolve, reject) => {
+              const timer = setTimeout(() => {
+                pendingPanelCallbacks.delete(requestId);
+                reject(new Error('Panel creation timed out'));
+              }, 10000);
+              pendingPanelCallbacks.set(requestId, { resolve, reject, timer });
+
+              const wins = BrowserWindow.getAllWindows();
+              if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
+                wins[0].webContents.send('panel:create-request', {
+                  requestId,
+                  url: panelUrl,
+                  termId: reqTermId !== undefined ? reqTermId : null,
+                });
+              } else {
+                pendingPanelCallbacks.delete(requestId);
+                clearTimeout(timer);
+                reject(new Error('No renderer window available'));
+              }
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (e) {
+            debugLog('[open-panel] Error:', e.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e.message }));
+          }
+          return;
+        }
+
+        res.writeHead(404);
+        res.end();
       } catch (e) {
         debugLog('[BrowserIntercept] Error:', e.message);
         res.writeHead(500);
@@ -647,6 +818,11 @@ app.whenReady().then(async () => {
 
         const menu = Menu.buildFromTemplate(menuTemplate);
         menu.popup();
+      });
+
+      contents.once('destroyed', () => {
+        attachedDebuggers.delete(contents.id);
+        webviewPanelMap.delete(contents.id);
       });
     }
   });
