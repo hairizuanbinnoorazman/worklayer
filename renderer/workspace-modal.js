@@ -16,8 +16,10 @@ function showWorkspaceModal() {
   header.textContent = 'New Workspace';
   modal.appendChild(header);
 
+  const profile = getActiveProfile();
+
   // Template selector
-  if (state.templates.length > 0) {
+  if (profile && profile.templates.length > 0) {
     const templateSection = document.createElement('div');
     templateSection.className = 'modal-template-section';
 
@@ -37,7 +39,7 @@ function showWorkspaceModal() {
     emptyOpt.textContent = '-- None --';
     templateSelect.appendChild(emptyOpt);
 
-    state.templates.forEach(t => {
+    profile.templates.forEach(t => {
       const opt = document.createElement('option');
       opt.value = t.id;
       opt.textContent = `${t.name} (${t.panels.length} panel${t.panels.length !== 1 ? 's' : ''})`;
@@ -53,7 +55,7 @@ function showWorkspaceModal() {
       const templateId = templateSelect.value;
       deleteTemplateBtn.style.display = templateId ? '' : 'none';
       if (templateId) {
-        const template = state.templates.find(t => t.id === templateId);
+        const template = profile.templates.find(t => t.id === templateId);
         if (template) {
           nameInput.value = template.name;
           panelRows = template.panels.map(p => ({ ...p }));
@@ -65,7 +67,7 @@ function showWorkspaceModal() {
     deleteTemplateBtn.addEventListener('click', () => {
       const templateId = templateSelect.value;
       if (!templateId) return;
-      const template = state.templates.find(t => t.id === templateId);
+      const template = profile.templates.find(t => t.id === templateId);
       if (template && confirm(`Delete template "${template.name}"?`)) {
         deleteTemplate(templateId);
         // Remove from select
@@ -74,7 +76,7 @@ function showWorkspaceModal() {
         templateSelect.value = '';
         deleteTemplateBtn.style.display = 'none';
         // Hide section if no templates left
-        if (state.templates.length === 0) {
+        if (profile.templates.length === 0) {
           templateSection.style.display = 'none';
         }
       }
@@ -95,7 +97,7 @@ function showWorkspaceModal() {
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
   nameInput.className = 'modal-input';
-  nameInput.placeholder = `Work ${state.groups.length + 1}`;
+  nameInput.placeholder = `Work ${profile ? profile.groups.length + 1 : 1}`;
   nameSection.appendChild(nameLabel);
   nameSection.appendChild(nameInput);
   modal.appendChild(nameSection);
@@ -335,8 +337,8 @@ function showWorkspaceModal() {
     if (panelRows.length === 0) {
       addGroup();
       // Rename it if a name was provided
-      if (nameInput.value.trim()) {
-        const group = state.groups[state.groups.length - 1];
+      if (nameInput.value.trim() && profile) {
+        const group = profile.groups[profile.groups.length - 1];
         group.label = nameInput.value.trim();
         saveState();
         renderSidebar();

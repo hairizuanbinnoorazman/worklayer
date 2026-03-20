@@ -192,7 +192,7 @@ function createResizeHandle(panelId) {
       const newWidth = Math.max(300, startWidth + (e.clientX - startX));
       updatePanelWidth(panelId, newWidth);
 
-      const container = getCachedContainer(state.activeGroupId);
+      const container = getCachedContainer(getActiveGroupId());
       const panelEl = container
         ? container.querySelector(`[data-panel-id="${panelId}"]`)
         : document.querySelector(`[data-panel-id="${panelId}"]`);

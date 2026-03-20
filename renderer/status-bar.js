@@ -4,7 +4,8 @@ function renderStatusBar() {
   const bar = document.getElementById('status-bar');
   if (!bar) return;
 
-  const allPanels = state.groups.flatMap(g => g.panels);
+  const profile = getActiveProfile();
+  const allPanels = profile ? profile.groups.flatMap(g => g.panels) : [];
 
   const types = [
     { type: 'terminal', label: 'Terminal', max: MAX_TERMINAL_PANELS },
@@ -12,13 +13,15 @@ function renderStatusBar() {
     { type: 'file', label: 'Files', max: MAX_FILE_PANELS },
   ];
 
-  bar.innerHTML = types.map(({ type, label, max }) => {
+  const profileLabel = profile ? `<span class="status-bar-item status-bar-profile">${profile.name}</span>` : '';
+
+  bar.innerHTML = profileLabel + types.map(({ type, label, max }) => {
     const count = allPanels.filter(p => p.type === type).length;
     if (type === 'terminal') {
       const activeCount = activeTerminals.size;
       return `<span class="status-bar-item">` +
         `<span class="status-bar-dot ${type}"></span>` +
-        `${label} ${activeCount} active · ${count} / ${max}` +
+        `${label} ${activeCount} active \u00b7 ${count} / ${max}` +
         `</span>`;
     }
     return `<span class="status-bar-item">` +
