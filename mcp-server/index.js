@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -17,6 +19,10 @@ if (!port || !token) {
 
 const cdp = new CdpClient(Number(port), token);
 let currentWebContentsId = null;
+
+const termId = process.env.WORKLAYER_TERM_ID || null;
+const profileId = process.env.WORKLAYER_PROFILE_ID || null;
+const groupId = process.env.WORKLAYER_GROUP_ID || null;
 
 // Simple mutex to serialize tool execution
 let mutexPromise = Promise.resolve();
@@ -60,6 +66,28 @@ server.tool('select_panel', 'Set target panel for subsequent tools', {
     if (!panel) throw new Error(`Panel "${panelId}" not found. Use list_panels to see available panels.`);
     currentWebContentsId = panel.webContentsId;
     return { content: [{ type: 'text', text: `Selected panel "${panelId}" (wcId=${currentWebContentsId})\nURL: ${panel.url}\nTitle: ${panel.title}` }] };
+  });
+});
+
+server.tool('open_panel', 'Create a new web panel with the given URL', {
+  url: z.string().describe('URL to open in the new panel'),
+}, async ({ url }) => {
+  return withMutex(async () => {
+    const result = await cdp.openPanel(url, termId, profileId, groupId);
+    if (result.error) throw new Error(result.error);
+    // Poll for webview to register (dom-ready is async)
+    let panel = null;
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const panels = await cdp.listPanels();
+      panel = panels.find(p => p.panelId === result.panelId);
+      if (panel) break;
+    }
+    if (panel) {
+      currentWebContentsId = panel.webContentsId;
+      return { content: [{ type: 'text', text: `Created and selected panel "${result.panelId}"\nURL: ${url}` }] };
+    }
+    return { content: [{ type: 'text', text: `Created panel "${result.panelId}" — webview still loading. Use list_panels + select_panel to target it.` }] };
   });
 });
 
@@ -140,6 +168,33 @@ server.tool('take_screenshot', 'Capture page as image', {
     const resp = await cdp.sendCommand(wcId, 'Page.captureScreenshot', params);
     if (resp.error) throw new Error(resp.error);
     return { content: [{ type: 'image', data: resp.result.data, mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png' }] };
+  });
+});
+
+server.tool('save_screenshot', 'Capture page screenshot and save to file', {
+  filePath: z.string().describe('Absolute file path to save the screenshot'),
+  format: z.enum(['png', 'jpeg']).optional().describe('Image format'),
+  quality: z.number().min(0).max(100).optional().describe('JPEG quality (0-100)'),
+  fullPage: z.boolean().optional().describe('Capture full scrollable page'),
+}, async ({ filePath, format, quality, fullPage }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const params = { format: format || 'png' };
+    if (format === 'jpeg' && quality !== undefined) params.quality = quality;
+    if (fullPage) {
+      const metrics = await cdp.sendCommand(wcId, 'Page.getLayoutMetrics', {});
+      if (!metrics.error && metrics.result) {
+        const { width, height } = metrics.result.contentSize || metrics.result.cssContentSize || {};
+        if (width && height) {
+          params.clip = { x: 0, y: 0, width, height, scale: 1 };
+        }
+      }
+    }
+    const resp = await cdp.sendCommand(wcId, 'Page.captureScreenshot', params);
+    if (resp.error) throw new Error(resp.error);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, Buffer.from(resp.result.data, 'base64'));
+    return { content: [{ type: 'text', text: `Screenshot saved to ${filePath}` }] };
   });
 });
 

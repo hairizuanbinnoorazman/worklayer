@@ -85,6 +85,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   authLoginResponse: (requestId, username, password, cancelled) =>
     ipcRenderer.send('auth:login-response', { requestId, username, password, cancelled }),
 
+  // Panel creation (MCP open_panel)
+  onPanelCreateRequest: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('panel:create-request', listener);
+    return () => ipcRenderer.removeListener('panel:create-request', listener);
+  },
+  panelCreateResponse: (requestId, panelId, error) =>
+    ipcRenderer.send('panel:create-response', { requestId, panelId, error }),
+
   // CDP webview registration
   cdpRegisterWebview: (webContentsId, panelId, url) =>
     ipcRenderer.send('cdp:register-webview', { webContentsId, panelId, url }),

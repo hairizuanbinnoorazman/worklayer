@@ -18,6 +18,10 @@ export class CdpClient {
     return this._post('/cdp/detach', { webContentsId });
   }
 
+  async openPanel(url, termId, profileId, groupId) {
+    return this._post('/open-panel', { url, termId, profileId, groupId });
+  }
+
   _get(path) {
     return new Promise((resolve, reject) => {
       const url = `http://127.0.0.1:${this.port}${path}?token=${this.token}`;

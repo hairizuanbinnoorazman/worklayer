@@ -25,6 +25,10 @@ const capturingWebContents = new Set();
 let authRequestIdCounter = 0;
 const pendingAuthCallbacks = new Map();
 
+// Panel creation request tracking (MCP open_panel)
+let panelRequestIdCounter = 0;
+const pendingPanelCallbacks = new Map();
+
 let pty;
 try {
   pty = require('node-pty');
@@ -106,7 +110,7 @@ ipcMain.handle('state:save', (_, state) => {
 });
 
 // Terminal IPC
-ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) => {
+ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand, profileId, groupId }) => {
   if (!pty) return { error: 'node-pty not available. Run: npm run postinstall' };
 
   const id = ++termIdCounter;
@@ -126,6 +130,8 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand }) =
     termEnv.WORKLAYER_MCP_PORT = String(browserInterceptPort);
     termEnv.WORKLAYER_MCP_TOKEN = browserInterceptToken;
   }
+  if (profileId) termEnv.WORKLAYER_PROFILE_ID = String(profileId);
+  if (groupId) termEnv.WORKLAYER_GROUP_ID = String(groupId);
 
   const term = pty.spawn(shell, [], {
     name: 'xterm-256color',
@@ -309,6 +315,16 @@ ipcMain.on('auth:login-response', (_, { requestId, username, password, cancelled
   if (!callback) return;
   if (cancelled) callback();
   else callback(username, password);
+});
+
+// Panel creation response IPC (MCP open_panel)
+ipcMain.on('panel:create-response', (_, { requestId, panelId, error }) => {
+  const pending = pendingPanelCallbacks.get(requestId);
+  if (!pending) return;
+  pendingPanelCallbacks.delete(requestId);
+  clearTimeout(pending.timer);
+  if (error) pending.reject(new Error(error));
+  else pending.resolve({ panelId });
 });
 
 // CDP webview registration IPC
@@ -504,6 +520,48 @@ function startBrowserInterceptServer() {
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // --- /open-panel: create a new web panel (MCP open_panel) ---
+        if (parsedUrl.pathname === '/open-panel' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { url: panelUrl, termId: reqTermId, profileId: reqProfileId, groupId: reqGroupId } = body;
+          if (!panelUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'url is required' }));
+            return;
+          }
+
+          const requestId = ++panelRequestIdCounter;
+          try {
+            const result = await new Promise((resolve, reject) => {
+              const timer = setTimeout(() => {
+                pendingPanelCallbacks.delete(requestId);
+                reject(new Error('Panel creation timed out'));
+              }, 10000);
+              pendingPanelCallbacks.set(requestId, { resolve, reject, timer });
+
+              const wins = BrowserWindow.getAllWindows();
+              if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
+                wins[0].webContents.send('panel:create-request', {
+                  requestId,
+                  url: panelUrl,
+                  termId: reqTermId !== undefined ? reqTermId : null,
+                });
+              } else {
+                pendingPanelCallbacks.delete(requestId);
+                clearTimeout(timer);
+                reject(new Error('No renderer window available'));
+              }
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+          } catch (e) {
+            debugLog('[open-panel] Error:', e.message);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: e.message }));
+          }
           return;
         }
 

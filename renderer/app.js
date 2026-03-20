@@ -332,12 +332,12 @@ async function addPanel(type) {
 
 function addWebPanelAt(url, insertIndex) {
   const group = getActiveGroup();
-  if (!group) return;
+  if (!group) return null;
 
   const profile = getActiveProfile();
-  if (!profile) return;
+  if (!profile) return null;
   const profileWebCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
-  if (profileWebCount >= MAX_WEB_PANELS) return;
+  if (profileWebCount >= MAX_WEB_PANELS) return null;
 
   const panel = {
     id: generateId(),
@@ -367,7 +367,7 @@ function addWebPanelAt(url, insertIndex) {
       removeCachedGroup(activeGId);
       renderPanelStrip();
       saveState();
-      return;
+      return panel.id;
     }
     renderStatusBar();
   } else {
@@ -375,23 +375,24 @@ function addWebPanelAt(url, insertIndex) {
   }
 
   saveState();
+  return panel.id;
 }
 
 function addWebPanelAfter(sourcePanelId, url) {
   const group = getActiveGroup();
-  if (!group) return;
+  if (!group) return null;
   const sourceIndex = group.panels.findIndex(p => p.id === sourcePanelId);
   if (sourceIndex === -1) {
-    addWebPanelAt(url, group.panels.length);
+    return addWebPanelAt(url, group.panels.length);
   } else {
-    addWebPanelAt(url, sourceIndex + 1);
+    return addWebPanelAt(url, sourceIndex + 1);
   }
 }
 
 function addWebPanelAtEnd(url) {
   const group = getActiveGroup();
-  if (!group) return;
-  addWebPanelAt(url, group.panels.length);
+  if (!group) return null;
+  return addWebPanelAt(url, group.panels.length);
 }
 
 function removePanel(panelId) {
