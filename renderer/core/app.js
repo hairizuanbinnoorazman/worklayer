@@ -511,7 +511,12 @@ function navigateWebPanel(panelId, url) {
   if (!panelEl) return;
   const webview = panelEl.querySelector('webview');
   if (webview) {
-    webview.src = normalizedUrl;
+    webview.loadURL(normalizedUrl).catch(err => {
+      console.log(`[navigateWebPanel] loadURL catch panelId=${panelId} url=${normalizedUrl} error=${err.message}`);
+      webview.dispatchEvent(new CustomEvent('loadurl-error', {
+        detail: { url: normalizedUrl, message: err.message }
+      }));
+    });
   }
   const urlInput = panelEl.querySelector('.url-input');
   if (urlInput) {

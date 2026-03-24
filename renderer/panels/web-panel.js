@@ -125,13 +125,42 @@ function renderWebPanel(panel, container) {
   const webview = document.createElement('webview');
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', 'persist:webpanels');
-  webview.src = panel.url || 'about:blank';
+  const initialUrl = panel.url || 'about:blank';
+  if (initialUrl === 'about:blank') {
+    webview.src = 'about:blank';
+  } else {
+    webview.loadURL(initialUrl).catch(err => {
+      console.log(`[WebPanel] loadURL catch (init) panel=${panel.id} url=${initialUrl} error=${err.message}`);
+      showErrorPage(initialUrl, err.message, -2);
+    });
+  }
   container.appendChild(webview);
 
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
   let lastRealUrl = panel.url || '';
   let crashRetryCount = 0;
+  let errorPageShownForUrl = null;
+
+  function showErrorPage(url, errorDescription, errorCode) {
+    if (errorPageShownForUrl === url) return;
+    errorPageShownForUrl = url;
+    loadingBar.classList.remove('active');
+    const retryUrl = url || lastRealUrl || '';
+    const errorPage = `
+      <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
+        <div style="text-align: center; max-width: 480px; padding: 2rem;">
+          <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
+          <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
+          <p style="color: #a6adc8; margin: 0 0 1rem;">${url || ''}</p>
+          <p style="color: #f38ba8;">${errorDescription || 'Unknown error'} (${errorCode})</p>
+          ${retryUrl ? `<button data-url="${encodeURIComponent(retryUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Retry</button>` : ''}
+        </div>
+      </body>
+      </html>`;
+    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+  }
 
   const navigate = (raw) => {
     let url = raw.trim();
@@ -144,7 +173,11 @@ function renderWebPanel(panel, container) {
       }
     }
     lastRealUrl = url;
-    webview.src = url;
+    errorPageShownForUrl = null;
+    webview.loadURL(url).catch(err => {
+      console.log(`[WebPanel] loadURL catch (navigate) panel=${panel.id} url=${url} error=${err.message}`);
+      showErrorPage(url, err.message, -2);
+    });
     urlInput.value = url;
     updatePanelUrl(panel.id, url);
     addToUrlHistory(url, '');
@@ -235,6 +268,7 @@ function renderWebPanel(panel, container) {
 
   webview.addEventListener('did-navigate', e => {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
+    errorPageShownForUrl = null;
     if (!e.url.startsWith('data:')) {
       lastRealUrl = e.url;
       crashRetryCount = 0;
@@ -264,20 +298,13 @@ function renderWebPanel(panel, container) {
   webview.addEventListener('did-fail-load', e => {
     console.log(`[WebPanel] did-fail-load panel=${panel.id} error=${e.errorDescription} code=${e.errorCode} url=${e.validatedURL}`);
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
-    const retryUrl = e.validatedURL || lastRealUrl || '';
-    const errorPage = `
-      <html>
-      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
-        <div style="text-align: center; max-width: 480px; padding: 2rem;">
-          <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
-          <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
-          <p style="color: #a6adc8; margin: 0 0 1rem;">${e.validatedURL || ''}</p>
-          <p style="color: #f38ba8;">${e.errorDescription || 'Unknown error'} (${e.errorCode})</p>
-          ${retryUrl ? `<button data-url="${encodeURIComponent(retryUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Retry</button>` : ''}
-        </div>
-      </body>
-      </html>`;
-    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+    showErrorPage(e.validatedURL || lastRealUrl || '', e.errorDescription, e.errorCode);
+  });
+
+  // Handle errors dispatched from navigateWebPanel in app.js
+  webview.addEventListener('loadurl-error', e => {
+    console.log(`[WebPanel] loadurl-error (custom) panel=${panel.id} url=${e.detail.url} error=${e.detail.message}`);
+    showErrorPage(e.detail.url, e.detail.message, -2);
   });
 
   // Handle renderer crashes with auto-retry
