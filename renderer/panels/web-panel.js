@@ -126,14 +126,7 @@ function renderWebPanel(panel, container) {
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', 'persist:webpanels');
   const initialUrl = panel.url || 'about:blank';
-  if (initialUrl === 'about:blank') {
-    webview.src = 'about:blank';
-  } else {
-    webview.loadURL(initialUrl).catch(err => {
-      console.log(`[WebPanel] loadURL catch (init) panel=${panel.id} url=${initialUrl} error=${err.message}`);
-      showErrorPage(initialUrl, err.message, -2);
-    });
-  }
+  webview.src = initialUrl;
   container.appendChild(webview);
 
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
