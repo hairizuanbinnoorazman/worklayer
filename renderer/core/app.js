@@ -285,7 +285,10 @@ async function addPanel(type) {
   const maxLimits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
   const maxForType = maxLimits[type];
   const profileCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === type).length;
-  if (maxForType && profileCount >= maxForType) return;
+  if (maxForType && profileCount >= maxForType) {
+    showPanelLimitNotification(type);
+    return;
+  }
 
   let extraProps = {};
   if (type === 'web') {
@@ -337,7 +340,10 @@ function addWebPanelAt(url, insertIndex) {
   const profile = getActiveProfile();
   if (!profile) return null;
   const profileWebCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
-  if (profileWebCount >= MAX_WEB_PANELS) return null;
+  if (profileWebCount >= MAX_WEB_PANELS) {
+    showPanelLimitNotification('web');
+    return null;
+  }
 
   const panel = {
     id: generateId(),
