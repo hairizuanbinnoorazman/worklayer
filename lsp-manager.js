@@ -203,6 +203,10 @@ async function startServer(sender, { groupId, rootDir, serverKey }) {
 
   activeServers.set(serverId, serverInfo);
 
+  proc.stdin.on('error', (err) => {
+    debugLog(`startServer[${serverId}]: stdin error: ${err.message}`);
+  });
+
   proc.stdout.on('data', (chunk) => {
     serverInfo.buffer = Buffer.concat([serverInfo.buffer, chunk]);
     const { messages, remaining } = parseMessages(serverInfo.buffer);
@@ -333,6 +337,11 @@ function sendRequestInternal(serverId, method, params) {
 
   return new Promise((resolve, reject) => {
     info.pending.set(id, { resolve, reject });
+    if (!info.process.stdin.writable) {
+      info.pending.delete(id);
+      reject(new Error('LSP process stdin is not writable'));
+      return;
+    }
     try {
       debugLog(`sendRequest[${serverId}]: ${method} id=${id}`);
       info.process.stdin.write(encodeMessage(msg));
@@ -349,6 +358,7 @@ function sendNotificationInternal(serverId, method, params) {
   if (!info) return;
 
   const msg = { jsonrpc: '2.0', method, params };
+  if (!info.process.stdin.writable) return;
   try {
     debugLog(`sendNotification[${serverId}]: ${method}`);
     info.process.stdin.write(encodeMessage(msg));
