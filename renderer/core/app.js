@@ -64,6 +64,11 @@ function migrateProfile(profile) {
   }
   for (const group of profile.groups) {
     group.lspServers = group.lspServers || [];
+    for (const panel of group.panels) {
+      if (panel.type === 'file' && !panel.openFiles) {
+        panel.openFiles = panel.openFile ? [panel.openFile] : [];
+      }
+    }
   }
   if (!profile.groups.find(g => g.id === profile.activeGroupId)) {
     profile.activeGroupId = profile.groups[0]?.id || null;
@@ -187,6 +192,7 @@ function addGroupWithPanels(name, panelConfigs) {
     } else if (config.type === 'file') {
       panel.rootDir = config.rootDir || '';
       panel.openFile = null;
+      panel.openFiles = [];
     }
     return panel;
   });
@@ -296,7 +302,7 @@ async function addPanel(type) {
   } else if (type === 'file') {
     const result = await window.electronAPI.openDirectory();
     if (result.cancelled) return;
-    extraProps = { rootDir: result.path, openFile: null };
+    extraProps = { rootDir: result.path, openFile: null, openFiles: [] };
   }
 
   const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH };
@@ -480,6 +486,7 @@ function applyPanelSettings(panelId, newSettings) {
     panel.rootDir = newSettings.rootDir || '';
     if (dirChanged) {
       panel.openFile = null;
+      panel.openFiles = [];
       rebuildFilePanel(panelId, panel);
     }
   }
