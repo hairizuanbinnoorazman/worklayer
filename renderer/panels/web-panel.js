@@ -148,14 +148,10 @@ function renderWebPanel(panel, container) {
   webview.setAttribute('partition', 'persist:webpanels');
   const initialUrl = panel.url || 'about:blank';
   container.appendChild(webview);
-  if (initialUrl === 'about:blank') {
-    webview.src = 'about:blank';
-  } else {
-    loadURLWithRetry(webview, initialUrl, 2, (err) => {
-      console.log(`[WebPanel] loadURL failed (init) panel=${panel.id} url=${initialUrl} error=${err.message}`);
-      showErrorPage(initialUrl, err.message, -2);
-    });
-  }
+  // Use src attribute for initial load — loadURL() requires the webview to be
+  // attached to the live DOM with dom-ready fired, but at this point the
+  // wrapper hasn't been appended to the panel strip yet.
+  webview.src = initialUrl;
 
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
