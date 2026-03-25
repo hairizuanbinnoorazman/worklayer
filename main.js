@@ -214,6 +214,43 @@ ipcMain.handle('fs:readDirectory', (_, { dirPath }) => {
   }
 });
 
+ipcMain.handle('fs:scanDirectory', (_, { rootDir, maxFiles = 50000 }) => {
+  try {
+    const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build']);
+    const files = [];
+    let truncated = false;
+
+    function walk(dir) {
+      if (truncated) return;
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (e) {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (SKIP_DIRS.has(entry.name)) continue;
+          walk(fullPath);
+        } else {
+          files.push(fullPath);
+          if (files.length >= maxFiles) {
+            truncated = true;
+            return;
+          }
+        }
+      }
+    }
+
+    walk(rootDir);
+    return { files, truncated };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
 ipcMain.handle('fs:readFile', (_, { filePath }) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
