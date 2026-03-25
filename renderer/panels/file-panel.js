@@ -92,9 +92,58 @@ function renderFilePanel(panel, container) {
   treeHeader.appendChild(refreshBtn);
   sidebar.appendChild(treeHeader);
 
+  // Search section
+  const searchSection = document.createElement('div');
+  searchSection.className = 'file-search-section';
+
+  const searchRow = document.createElement('div');
+  searchRow.className = 'file-search-row';
+
+  const searchInput = document.createElement('input');
+  searchInput.className = 'file-search-input';
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search files...';
+
+  const searchModeBtn = document.createElement('button');
+  searchModeBtn.className = 'file-search-mode-btn';
+  searchModeBtn.textContent = 'aa';
+  searchModeBtn.title = 'Search mode: case-insensitive';
+
+  searchRow.appendChild(searchInput);
+  searchRow.appendChild(searchModeBtn);
+
+  const filterRow = document.createElement('div');
+  filterRow.className = 'file-search-filter-row';
+
+  const includeInput = document.createElement('input');
+  includeInput.className = 'file-search-include';
+  includeInput.type = 'text';
+  includeInput.placeholder = 'Include *.js,*.ts';
+
+  const excludeInput = document.createElement('input');
+  excludeInput.className = 'file-search-exclude';
+  excludeInput.type = 'text';
+  excludeInput.placeholder = 'Exclude *.test.js';
+
+  filterRow.appendChild(includeInput);
+  filterRow.appendChild(excludeInput);
+
+  const searchInfo = document.createElement('div');
+  searchInfo.className = 'file-search-info';
+
+  searchSection.appendChild(searchRow);
+  searchSection.appendChild(filterRow);
+  searchSection.appendChild(searchInfo);
+  sidebar.appendChild(searchSection);
+
   const treeContainer = document.createElement('div');
   treeContainer.className = 'file-tree-entries';
   sidebar.appendChild(treeContainer);
+
+  const searchResults = document.createElement('div');
+  searchResults.className = 'file-search-results';
+  searchResults.hidden = true;
+  sidebar.appendChild(searchResults);
 
   // Internal resize handle
   const resizeHandle = document.createElement('div');
@@ -628,7 +677,194 @@ function renderFilePanel(panel, container) {
     loadTreeEntries(panel.rootDir, treeContainer, 0).then(() => applyTreeColors());
   }
 
+  // --- File search ---
+
+  let cachedFileList = null;
+  let isFileListLoading = false;
+  let searchDebounceTimer = null;
+  let currentSearchMode = 'loose'; // 'loose' | 'strict' | 'regex'
+  let isSearchActive = false;
+
+  function updateModeButton() {
+    searchModeBtn.classList.remove('mode-strict', 'mode-regex');
+    if (currentSearchMode === 'loose') {
+      searchModeBtn.textContent = 'aa';
+      searchModeBtn.title = 'Search mode: case-insensitive';
+    } else if (currentSearchMode === 'strict') {
+      searchModeBtn.textContent = 'Aa';
+      searchModeBtn.title = 'Search mode: case-sensitive';
+      searchModeBtn.classList.add('mode-strict');
+    } else {
+      searchModeBtn.textContent = '.*';
+      searchModeBtn.title = 'Search mode: regex';
+      searchModeBtn.classList.add('mode-regex');
+    }
+  }
+
+  searchModeBtn.addEventListener('click', () => {
+    if (currentSearchMode === 'loose') currentSearchMode = 'strict';
+    else if (currentSearchMode === 'strict') currentSearchMode = 'regex';
+    else currentSearchMode = 'loose';
+    updateModeButton();
+    scheduleSearch();
+  });
+
+  async function ensureFileList() {
+    if (cachedFileList) return cachedFileList;
+    if (isFileListLoading) return null;
+    isFileListLoading = true;
+    searchInfo.textContent = 'Scanning...';
+    const result = await window.electronAPI.scanDirectory(panel.rootDir);
+    isFileListLoading = false;
+    if (result.error) {
+      searchInfo.textContent = 'Scan failed';
+      return null;
+    }
+    cachedFileList = result.files;
+    if (result.truncated) {
+      searchInfo.textContent = `${result.files.length}+ files (truncated)`;
+    }
+    return cachedFileList;
+  }
+
+  function parseGlobPatterns(input) {
+    if (!input.trim()) return [];
+    return input.split(',').map(p => p.trim()).filter(Boolean).map(pattern => {
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                             .replace(/\*/g, '.*')
+                             .replace(/\?/g, '.');
+      return new RegExp('^' + escaped + '$', 'i');
+    });
+  }
+
+  function showSearchResults(results) {
+    isSearchActive = true;
+    treeContainer.hidden = true;
+    searchResults.hidden = false;
+    searchResults.innerHTML = '';
+
+    const MAX_DISPLAY = 500;
+    const displayResults = results.slice(0, MAX_DISPLAY);
+
+    searchInfo.textContent = results.length > MAX_DISPLAY
+      ? `${results.length} matches (showing ${MAX_DISPLAY})`
+      : `${results.length} match${results.length !== 1 ? 'es' : ''}`;
+
+    displayResults.forEach(fullPath => {
+      const item = document.createElement('div');
+      item.className = 'tree-item tree-file file-search-result-item';
+
+      const relPath = fullPath.substring(panel.rootDir.length + 1);
+      const fileName = relPath.split('/').pop();
+      const dirPath = relPath.substring(0, relPath.length - fileName.length);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'tree-name';
+      nameSpan.textContent = fileName;
+
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'file-search-result-path';
+      pathSpan.textContent = dirPath;
+
+      item.appendChild(nameSpan);
+      item.appendChild(pathSpan);
+      item.title = fullPath;
+
+      item.addEventListener('click', () => {
+        if (activeTreeItem) activeTreeItem.classList.remove('active');
+        item.classList.add('active');
+        activeTreeItem = item;
+        openFile(fullPath);
+      });
+
+      searchResults.appendChild(item);
+    });
+  }
+
+  function exitSearch() {
+    isSearchActive = false;
+    treeContainer.hidden = false;
+    searchResults.hidden = true;
+    searchResults.innerHTML = '';
+    searchInfo.textContent = '';
+  }
+
+  async function executeSearch() {
+    const query = searchInput.value.trim();
+    if (!query && !includeInput.value.trim() && !excludeInput.value.trim()) {
+      exitSearch();
+      return;
+    }
+
+    if (!panel.rootDir) return;
+
+    const files = await ensureFileList();
+    if (!files) return;
+
+    // Build matcher based on mode
+    let matcher;
+    if (!query) {
+      matcher = () => true;
+    } else if (currentSearchMode === 'strict') {
+      matcher = (relPath) => relPath.includes(query);
+    } else if (currentSearchMode === 'loose') {
+      const lowerQ = query.toLowerCase();
+      matcher = (relPath) => relPath.toLowerCase().includes(lowerQ);
+    } else {
+      try {
+        const re = new RegExp(query);
+        matcher = (relPath) => re.test(relPath);
+      } catch (e) {
+        searchInfo.textContent = 'Invalid regex';
+        return;
+      }
+    }
+
+    const includePatterns = parseGlobPatterns(includeInput.value);
+    const excludePatterns = parseGlobPatterns(excludeInput.value);
+
+    const results = files.filter(fullPath => {
+      const relPath = fullPath.substring(panel.rootDir.length + 1);
+      const fileName = relPath.split('/').pop();
+
+      if (includePatterns.length > 0) {
+        if (!includePatterns.some(re => re.test(fileName))) return false;
+      }
+      if (excludePatterns.length > 0) {
+        if (excludePatterns.some(re => re.test(fileName))) return false;
+      }
+
+      return matcher(relPath);
+    });
+
+    showSearchResults(results);
+  }
+
+  function scheduleSearch() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(executeSearch, 200);
+  }
+
+  searchInput.addEventListener('input', scheduleSearch);
+  includeInput.addEventListener('input', scheduleSearch);
+  excludeInput.addEventListener('input', scheduleSearch);
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      includeInput.value = '';
+      excludeInput.value = '';
+      exitSearch();
+    }
+  });
+
   refreshBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    includeInput.value = '';
+    excludeInput.value = '';
+    cachedFileList = null;
+    exitSearch();
+
     treeContainer.innerHTML = '';
     if (panel.rootDir) {
       loadTreeEntries(panel.rootDir, treeContainer, 0).then(() => applyTreeColors());

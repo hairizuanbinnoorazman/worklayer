@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   readDirectory: (dirPath) => ipcRenderer.invoke('fs:readDirectory', { dirPath }),
+  scanDirectory: (rootDir, maxFiles) => ipcRenderer.invoke('fs:scanDirectory', { rootDir, maxFiles }),
   readFile: (filePath) => ipcRenderer.invoke('fs:readFile', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', { filePath, content }),
   gitDiff: (filePath) => ipcRenderer.invoke('git:diff', { filePath }),
