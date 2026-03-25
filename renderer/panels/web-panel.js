@@ -158,6 +158,41 @@ function renderWebPanel(panel, container) {
   let lastRealUrl = panel.url || '';
   let crashRetryCount = 0;
   let errorPageShownForUrl = null;
+  let navigateInFlight = false;
+
+  // DOM-based error overlay shown when webview.loadURL() itself is broken
+  function showErrorOverlay(url, errorDescription) {
+    let overlay = container.querySelector('.webview-error-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'webview-error-overlay';
+      overlay.style.cssText = 'position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:#1e1e2e;color:#cdd6f4;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+      container.style.position = 'relative';
+      container.appendChild(overlay);
+    }
+    const retryUrl = url || lastRealUrl || '';
+    overlay.innerHTML = `
+      <div style="text-align:center;max-width:480px;padding:2rem;">
+        <div style="font-size:3rem;margin-bottom:1rem;">\u26a0</div>
+        <h2 style="margin:0 0 0.5rem;">Failed to load page</h2>
+        <p style="color:#a6adc8;margin:0 0 1rem;">${url || ''}</p>
+        <p style="color:#f38ba8;">${errorDescription || 'Unknown error'}</p>
+        ${retryUrl ? '<button class="error-overlay-retry" style="margin-top:1rem;padding:0.5rem 1.5rem;border:none;border-radius:6px;background:#89b4fa;color:#1e1e2e;font-size:1rem;cursor:pointer;">Retry</button>' : ''}
+      </div>`;
+    const retryBtn = overlay.querySelector('.error-overlay-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        overlay.remove();
+        navigate(retryUrl);
+      });
+    }
+    overlay.hidden = false;
+  }
+
+  function removeErrorOverlay() {
+    const overlay = container.querySelector('.webview-error-overlay');
+    if (overlay) overlay.remove();
+  }
 
   function showErrorPage(url, errorDescription, errorCode) {
     if (errorPageShownForUrl === url) return;
@@ -176,12 +211,19 @@ function renderWebPanel(panel, container) {
         </div>
       </body>
       </html>`;
-    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage));
+    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage)).catch(err => {
+      console.log(`[WebPanel] Error page loadURL also failed panel=${panel.id}, falling back to overlay`);
+      showErrorOverlay(url, errorDescription);
+    });
   }
 
   const navigate = (raw) => {
     let url = raw.trim();
     if (!url) return;
+    if (navigateInFlight) {
+      console.log(`[WebPanel] navigate blocked — already in flight panel=${panel.id}`);
+      return;
+    }
     if (!/^[a-z][a-z\d+\-.]*:/i.test(url)) {
       if (/^[\w-]+(\.[\w-]+)+/.test(url) && !url.includes(' ')) {
         url = 'https://' + url;
@@ -191,7 +233,10 @@ function renderWebPanel(panel, container) {
     }
     lastRealUrl = url;
     errorPageShownForUrl = null;
+    navigateInFlight = true;
+    removeErrorOverlay();
     loadURLWithRetry(webview, url, 2, (err) => {
+      navigateInFlight = false;
       console.log(`[WebPanel] loadURL failed (navigate) panel=${panel.id} url=${url} error=${err.message}`);
       showErrorPage(url, err.message, -2);
     });
@@ -285,7 +330,9 @@ function renderWebPanel(panel, container) {
 
   webview.addEventListener('did-navigate', e => {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
+    navigateInFlight = false;
     errorPageShownForUrl = null;
+    removeErrorOverlay();
     if (!e.url.startsWith('data:')) {
       lastRealUrl = e.url;
       crashRetryCount = 0;
@@ -354,7 +401,10 @@ function renderWebPanel(panel, container) {
           </div>
         </body>
         </html>`;
-      webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(crashPage));
+      webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(crashPage)).catch(err => {
+        console.log(`[WebPanel] Crash page loadURL also failed panel=${panel.id}, falling back to overlay`);
+        showErrorOverlay(lastRealUrl, `The renderer process exited unexpectedly (${reason})`);
+      });
     }
   });
 
