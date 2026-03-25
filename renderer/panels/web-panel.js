@@ -27,6 +27,27 @@ if (window.electronAPI.onWebviewOpenInNewPanel) {
   });
 }
 
+function isAbortedError(err) {
+  return err && err.message && err.message.includes('ERR_ABORTED');
+}
+
+function loadURLWithRetry(webview, url, maxRetries, onFail) {
+  let attempt = 0;
+  function tryLoad() {
+    webview.loadURL(url).catch(err => {
+      if (isAbortedError(err)) return;
+      attempt++;
+      if (attempt <= maxRetries) {
+        console.log(`[WebPanel] loadURL retry ${attempt}/${maxRetries} url=${url} error=${err.message}`);
+        setTimeout(tryLoad, 500);
+      } else {
+        onFail(err);
+      }
+    });
+  }
+  tryLoad();
+}
+
 function renderWebPanel(panel, container) {
   const urlBar = document.createElement('div');
   urlBar.className = 'url-bar';
@@ -126,8 +147,15 @@ function renderWebPanel(panel, container) {
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', 'persist:webpanels');
   const initialUrl = panel.url || 'about:blank';
-  webview.src = initialUrl;
   container.appendChild(webview);
+  if (initialUrl === 'about:blank') {
+    webview.src = 'about:blank';
+  } else {
+    loadURLWithRetry(webview, initialUrl, 2, (err) => {
+      console.log(`[WebPanel] loadURL failed (init) panel=${panel.id} url=${initialUrl} error=${err.message}`);
+      showErrorPage(initialUrl, err.message, -2);
+    });
+  }
 
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
@@ -167,8 +195,8 @@ function renderWebPanel(panel, container) {
     }
     lastRealUrl = url;
     errorPageShownForUrl = null;
-    webview.loadURL(url).catch(err => {
-      console.log(`[WebPanel] loadURL catch (navigate) panel=${panel.id} url=${url} error=${err.message}`);
+    loadURLWithRetry(webview, url, 2, (err) => {
+      console.log(`[WebPanel] loadURL failed (navigate) panel=${panel.id} url=${url} error=${err.message}`);
       showErrorPage(url, err.message, -2);
     });
     urlInput.value = url;
@@ -296,6 +324,7 @@ function renderWebPanel(panel, container) {
 
   // Handle errors dispatched from navigateWebPanel in app.js
   webview.addEventListener('loadurl-error', e => {
+    if (e.detail.message && e.detail.message.includes('ERR_ABORTED')) return;
     console.log(`[WebPanel] loadurl-error (custom) panel=${panel.id} url=${e.detail.url} error=${e.detail.message}`);
     showErrorPage(e.detail.url, e.detail.message, -2);
   });
@@ -309,7 +338,12 @@ function renderWebPanel(panel, container) {
     if (crashRetryCount < 5 && lastRealUrl) {
       crashRetryCount++;
       console.log(`[WebPanel] Auto-retry ${crashRetryCount}/5 for panel=${panel.id} url=${lastRealUrl}`);
-      setTimeout(() => webview.loadURL(lastRealUrl), 500);
+      setTimeout(() => {
+        loadURLWithRetry(webview, lastRealUrl, 1, (err) => {
+          console.log(`[WebPanel] loadURL failed (crash-retry) panel=${panel.id} url=${lastRealUrl} error=${err.message}`);
+          showErrorPage(lastRealUrl, err.message, -2);
+        });
+      }, 500);
     } else {
       console.log(`[WebPanel] Max retries reached for panel=${panel.id}, showing error page`);
       const crashPage = `
