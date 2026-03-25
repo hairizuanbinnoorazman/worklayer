@@ -524,12 +524,24 @@ function navigateWebPanel(panelId, url) {
   if (!panelEl) return;
   const webview = panelEl.querySelector('webview');
   if (webview) {
-    webview.loadURL(normalizedUrl).catch(err => {
-      console.log(`[navigateWebPanel] loadURL catch panelId=${panelId} url=${normalizedUrl} error=${err.message}`);
-      webview.dispatchEvent(new CustomEvent('loadurl-error', {
-        detail: { url: normalizedUrl, message: err.message }
-      }));
-    });
+    let navAttempt = 0;
+    const maxNavRetries = 2;
+    function tryNav() {
+      webview.loadURL(normalizedUrl).catch(err => {
+        if (err && err.message && err.message.includes('ERR_ABORTED')) return;
+        navAttempt++;
+        if (navAttempt <= maxNavRetries) {
+          console.log(`[navigateWebPanel] retry ${navAttempt}/${maxNavRetries} url=${normalizedUrl} error=${err.message}`);
+          setTimeout(tryNav, 500);
+        } else {
+          console.log(`[navigateWebPanel] loadURL failed panelId=${panelId} url=${normalizedUrl} error=${err.message}`);
+          webview.dispatchEvent(new CustomEvent('loadurl-error', {
+            detail: { url: normalizedUrl, message: err.message }
+          }));
+        }
+      });
+    }
+    tryNav();
   }
   const urlInput = panelEl.querySelector('.url-input');
   if (urlInput) {
