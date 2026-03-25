@@ -107,14 +107,6 @@ function renderFilePanel(panel, container) {
   const toolbar = document.createElement('div');
   toolbar.className = 'editor-toolbar';
 
-  const fileLabel = document.createElement('span');
-  fileLabel.className = 'editor-file-label';
-  fileLabel.textContent = 'No file selected';
-
-  const modifiedDot = document.createElement('span');
-  modifiedDot.className = 'editor-modified-dot';
-  modifiedDot.title = 'Unsaved changes';
-
   const saveBtn = document.createElement('button');
   saveBtn.className = 'editor-save-btn';
   saveBtn.textContent = 'Save';
@@ -125,11 +117,13 @@ function renderFilePanel(panel, container) {
   lspBtn.textContent = 'LSP';
   lspBtn.title = 'Language Server Settings';
 
-  toolbar.appendChild(fileLabel);
-  toolbar.appendChild(modifiedDot);
   toolbar.appendChild(saveBtn);
   toolbar.appendChild(lspBtn);
   editorArea.appendChild(toolbar);
+
+  const tabBar = document.createElement('div');
+  tabBar.className = 'editor-tab-bar';
+  editorArea.appendChild(tabBar);
 
   const editorContainer = document.createElement('div');
   editorContainer.className = 'editor-container';
@@ -158,8 +152,12 @@ function renderFilePanel(panel, container) {
 
   function setDirty(dirty) {
     isDirty = dirty;
-    modifiedDot.classList.toggle('visible', dirty);
     saveBtn.disabled = !dirty;
+    const activeTab = tabBar.querySelector('.editor-tab.active');
+    if (activeTab) {
+      const dot = activeTab.querySelector('.editor-tab-modified-dot');
+      if (dot) dot.classList.toggle('visible', dirty);
+    }
   }
 
   async function saveFile() {
@@ -206,13 +204,115 @@ function renderFilePanel(panel, container) {
     }
   }
 
-  async function openFile(filePath) {
+  const MAX_OPEN_TABS = 20;
+
+  function renderTabs() {
+    tabBar.innerHTML = '';
+    const openFiles = panel.openFiles || [];
+
+    openFiles.forEach(filePath => {
+      const tab = document.createElement('div');
+      tab.className = 'editor-tab';
+      if (filePath === currentFilePath) {
+        tab.classList.add('active');
+      }
+      tab.title = filePath;
+
+      const tabDot = document.createElement('span');
+      tabDot.className = 'editor-tab-modified-dot';
+      if (filePath === currentFilePath && isDirty) {
+        tabDot.classList.add('visible');
+      }
+
+      const tabName = document.createElement('span');
+      tabName.className = 'editor-tab-name';
+      tabName.textContent = filePath.split('/').pop();
+
+      const tabClose = document.createElement('button');
+      tabClose.className = 'editor-tab-close';
+      tabClose.textContent = '\u00d7';
+      tabClose.title = 'Close tab';
+      tabClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(filePath);
+      });
+
+      tab.appendChild(tabDot);
+      tab.appendChild(tabName);
+      tab.appendChild(tabClose);
+
+      tab.addEventListener('click', () => {
+        if (filePath !== currentFilePath) {
+          openFile(filePath);
+        }
+      });
+
+      tab.addEventListener('mousedown', (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          closeTab(filePath);
+        }
+      });
+
+      tabBar.appendChild(tab);
+    });
+  }
+
+  function closeTab(filePath) {
+    if (!panel.openFiles) return;
+
+    const idx = panel.openFiles.indexOf(filePath);
+    if (idx === -1) return;
+
+    if (filePath === currentFilePath) {
+      if (isDirty) {
+        const proceed = confirm(`"${filePath.split('/').pop()}" has unsaved changes. Discard?`);
+        if (!proceed) return;
+      }
+
+      panel.openFiles.splice(idx, 1);
+
+      if (panel.openFiles.length > 0) {
+        const newIdx = Math.min(idx, panel.openFiles.length - 1);
+        const newFile = panel.openFiles[newIdx];
+        panel.openFile = newFile;
+        saveState();
+        openFile(newFile, true);
+      } else {
+        if (currentFilePath) {
+          for (const sid of panelLspServerIds) {
+            lspDidClose(sid, currentFilePath);
+          }
+        }
+        currentFilePath = null;
+        panel.openFile = null;
+        setDirty(false);
+        if (currentEditor) {
+          currentEditor.setModel(null);
+        }
+        placeholder.style.display = '';
+        placeholder.textContent = 'Select a file to edit';
+        saveState();
+        renderTabs();
+      }
+    } else {
+      panel.openFiles.splice(idx, 1);
+      if (window.monaco) {
+        const uri = monaco.Uri.file(filePath);
+        const model = monaco.editor.getModel(uri);
+        if (model) model.dispose();
+      }
+      saveState();
+      renderTabs();
+    }
+  }
+
+  async function openFile(filePath, skipDirtyCheck) {
     if (isBinaryFile(filePath)) {
       if (currentEditor) {
         currentEditor.setValue('');
         currentEditor.updateOptions({ readOnly: true });
       }
-      fileLabel.textContent = filePath.split('/').pop();
       placeholder.textContent = 'Cannot edit binary file';
       placeholder.style.display = currentEditor ? 'none' : '';
       if (currentEditor) {
@@ -227,7 +327,7 @@ function renderFilePanel(panel, container) {
       return;
     }
 
-    if (isDirty && currentFilePath) {
+    if (!skipDirtyCheck && isDirty && currentFilePath) {
       const proceed = confirm(`"${currentFilePath.split('/').pop()}" has unsaved changes. Discard?`);
       if (!proceed) return;
     }
@@ -240,11 +340,36 @@ function renderFilePanel(panel, container) {
 
     const previousFilePath = currentFilePath;
     currentFilePath = filePath;
+
+    if (!panel.openFiles) panel.openFiles = [];
+    if (!panel.openFiles.includes(filePath)) {
+      panel.openFiles.push(filePath);
+    }
+    // Evict oldest non-active tabs if over limit
+    while (panel.openFiles.length > MAX_OPEN_TABS) {
+      const oldest = panel.openFiles[0];
+      if (oldest !== filePath) {
+        panel.openFiles.shift();
+        if (window.monaco) {
+          const uri = monaco.Uri.file(oldest);
+          const m = monaco.editor.getModel(uri);
+          if (m) m.dispose();
+        }
+      } else {
+        break;
+      }
+    }
     panel.openFile = filePath;
     saveState();
+    renderTabs();
 
-    fileLabel.textContent = filePath.split('/').pop();
-    fileLabel.title = filePath;
+    // Sync tree selection
+    if (activeTreeItem) activeTreeItem.classList.remove('active');
+    const treeItem = treeContainer.querySelector(`.tree-item[data-path="${CSS.escape(filePath)}"]`);
+    if (treeItem) {
+      treeItem.classList.add('active');
+      activeTreeItem = treeItem;
+    }
 
     const lang = getLanguageFromPath(filePath);
     docVersion++;
@@ -332,6 +457,12 @@ function renderFilePanel(panel, container) {
     setDirty(false);
     updateGitDecorations();
   }
+
+  // Initialize openFiles if missing (migration)
+  if (!panel.openFiles) {
+    panel.openFiles = panel.openFile ? [panel.openFile] : [];
+  }
+  renderTabs();
 
   // Open the previously open file on restore
   if (panel.openFile) {
