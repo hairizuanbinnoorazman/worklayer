@@ -7,7 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { CdpClient } from './cdp-client.js';
 import { takeSnapshot } from './snapshot.js';
-import { resolveUidToCoords, focusUid } from './element.js';
+import { resolveUidToCoords, focusUid, resolveUidToObjectId } from './element.js';
 
 const port = process.env.WORKLAYER_MCP_PORT;
 const token = process.env.WORKLAYER_MCP_TOKEN;
@@ -225,15 +225,54 @@ server.tool('type_text', 'Type text into the currently focused element', {
 }, async ({ text, submitKey }) => {
   return withMutex(async () => {
     const wcId = requirePanel();
-    await cdp.sendCommand(wcId, 'Input.insertText', { text });
+    // Use Runtime.evaluate to insert text via JS (CDP Input.insertText doesn't work in Electron webview debugger)
+    await cdp.sendCommand(wcId, 'Runtime.evaluate', {
+      expression: `(() => {
+        const text = ${JSON.stringify(text)};
+        const el = document.activeElement;
+        if (!el) return 'no-active-element';
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            el.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype,
+            'value'
+          ).set;
+          const start = el.selectionStart || 0;
+          const end = el.selectionEnd || 0;
+          const current = el.value;
+          const newValue = current.substring(0, start) + text + current.substring(end);
+          nativeSetter.call(el, newValue);
+          el.selectionStart = el.selectionEnd = start + text.length;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          return 'typed-native';
+        }
+        if (el.isContentEditable) {
+          document.execCommand('insertText', false, text);
+          return 'typed-contenteditable';
+        }
+        return 'unsupported-element';
+      })()`,
+      returnByValue: true,
+    });
+
     if (submitKey) {
-      await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-        type: 'keyDown', key: submitKey, code: `Key${submitKey}`,
-        windowsVirtualKeyCode: submitKey === 'Enter' ? 13 : 0,
-      });
-      await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-        type: 'keyUp', key: submitKey, code: `Key${submitKey}`,
-        windowsVirtualKeyCode: submitKey === 'Enter' ? 13 : 0,
+      await cdp.sendCommand(wcId, 'Runtime.evaluate', {
+        expression: `(() => {
+          const key = ${JSON.stringify(submitKey)};
+          const vkMap = { Enter: 13, Tab: 9, Escape: 27 };
+          const el = document.activeElement || document.body;
+          const opts = { key, code: key, keyCode: vkMap[key] || 0, which: vkMap[key] || 0, bubbles: true, cancelable: true };
+          const downEvent = new KeyboardEvent('keydown', opts);
+          const prevented = !el.dispatchEvent(downEvent);
+          if (!prevented && key === 'Enter') {
+            const form = el.closest('form');
+            if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); }
+          }
+          el.dispatchEvent(new KeyboardEvent('keyup', opts));
+          return 'key-dispatched';
+        })()`,
+        returnByValue: true,
       });
     }
     return { content: [{ type: 'text', text: `Typed "${text}"${submitKey ? ` + ${submitKey}` : ''}` }] };
@@ -247,21 +286,44 @@ server.tool('fill', 'Focus element by UID, clear it, and fill with value', {
   return withMutex(async () => {
     const wcId = requirePanel();
     await focusUid(cdp, wcId, uid);
-    // Select all then delete to clear
-    await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-      type: 'keyDown', key: 'a', code: 'KeyA', modifiers: process.platform === 'darwin' ? 4 : 2, // meta or ctrl
+    const { objectId } = await resolveUidToObjectId(cdp, wcId, uid);
+    // Use Runtime.callFunctionOn to clear and fill (CDP Input commands don't work in Electron webview debugger)
+    const fillResp = await cdp.sendCommand(wcId, 'Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function(newValue) {
+        if (this.tagName === 'SELECT') {
+          this.value = newValue;
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          return 'filled-select';
+        }
+        if (this.tagName === 'INPUT' || this.tagName === 'TEXTAREA') {
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            this.tagName === 'TEXTAREA'
+              ? window.HTMLTextAreaElement.prototype
+              : window.HTMLInputElement.prototype,
+            'value'
+          ).set;
+          nativeSetter.call(this, '');
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          nativeSetter.call(this, newValue);
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          return 'filled-native';
+        }
+        if (this.isContentEditable) {
+          this.focus();
+          document.execCommand('selectAll', false, null);
+          document.execCommand('delete', false, null);
+          document.execCommand('insertText', false, newValue);
+          return 'filled-contenteditable';
+        }
+        return 'unknown-element-type';
+      }`,
+      arguments: [{ value: value }],
+      returnByValue: true,
     });
-    await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'a', code: 'KeyA', modifiers: process.platform === 'darwin' ? 4 : 2,
-    });
-    await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-      type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8,
-    });
-    await cdp.sendCommand(wcId, 'Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8,
-    });
-    // Insert new text
-    await cdp.sendCommand(wcId, 'Input.insertText', { text: value });
+    if (fillResp.error) throw new Error(fillResp.error);
     return { content: [{ type: 'text', text: `Filled element [${uid}] with "${value}"` }] };
   });
 });

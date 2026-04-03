@@ -30,6 +30,23 @@ export async function resolveUidToCoords(cdpClient, webContentsId, uid) {
   return { x, y };
 }
 
+export async function resolveUidToObjectId(cdpClient, webContentsId, uid) {
+  const map = getUidMap();
+  const backendNodeId = map.get(String(uid));
+  if (!backendNodeId) {
+    throw new Error(`UID ${uid} not found in snapshot. Take a new snapshot first.`);
+  }
+
+  const resolveResp = await cdpClient.sendCommand(webContentsId, 'DOM.resolveNode', {
+    backendNodeId,
+  });
+  if (resolveResp.error) throw new Error(resolveResp.error);
+  const objectId = resolveResp.result.object?.objectId;
+  if (!objectId) throw new Error('Could not resolve node to remote object');
+
+  return { objectId, backendNodeId };
+}
+
 export async function focusUid(cdpClient, webContentsId, uid) {
   const map = getUidMap();
   const backendNodeId = map.get(String(uid));
