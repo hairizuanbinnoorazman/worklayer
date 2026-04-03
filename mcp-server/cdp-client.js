@@ -26,11 +26,24 @@ export class CdpClient {
     return new Promise((resolve, reject) => {
       const url = `http://127.0.0.1:${this.port}${path}?token=${this.token}`;
       http.get(url, (res) => {
+        const statusCode = res.statusCode;
         let data = '';
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch { resolve(data); }
+          try {
+            const parsed = JSON.parse(data);
+            if (statusCode >= 400) {
+              reject(new Error(parsed.error || `HTTP ${statusCode}: ${data}`));
+            } else {
+              resolve(parsed);
+            }
+          } catch {
+            if (statusCode >= 400) {
+              reject(new Error(`HTTP ${statusCode}: ${data}`));
+            } else {
+              resolve(data);
+            }
+          }
         });
       }).on('error', reject);
     });
@@ -49,11 +62,24 @@ export class CdpClient {
           'Content-Length': Buffer.byteLength(payload),
         },
       }, (res) => {
+        const statusCode = res.statusCode;
         let data = '';
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => {
-          try { resolve(JSON.parse(data)); }
-          catch { resolve(data); }
+          try {
+            const parsed = JSON.parse(data);
+            if (statusCode >= 400) {
+              reject(new Error(parsed.error || `HTTP ${statusCode}: ${data}`));
+            } else {
+              resolve(parsed);
+            }
+          } catch {
+            if (statusCode >= 400) {
+              reject(new Error(`HTTP ${statusCode}: ${data}`));
+            } else {
+              resolve(data);
+            }
+          }
         });
       });
       req.on('error', reject);

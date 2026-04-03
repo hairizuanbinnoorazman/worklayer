@@ -686,6 +686,7 @@ function startBrowserInterceptServer() {
               await wc.debugger.sendCommand('DOM.enable');
               await wc.debugger.sendCommand('Accessibility.enable');
               await wc.debugger.sendCommand('Network.enable');
+              await wc.debugger.sendCommand('Runtime.enable');
               debugLog('[CDP] Attached debugger to wcId:', wcId);
             } catch (e) {
               debugLog('[CDP] Attach error:', e.message);
