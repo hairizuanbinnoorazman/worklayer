@@ -350,6 +350,7 @@ async function addPanel(type) {
     renderPanelStrip();
   }
 
+  renderSidebar();
   saveState();
 }
 
@@ -395,6 +396,7 @@ function addWebPanelAt(url, insertIndex, targetGroupId) {
       } else {
         removeCachedGroup(activeGId);
         renderPanelStrip();
+        renderSidebar();
         saveState();
         return panel.id;
       }
@@ -424,6 +426,7 @@ function addWebPanelAt(url, insertIndex, targetGroupId) {
     renderStatusBar();
   }
 
+  renderSidebar();
   saveState();
   return panel.id;
 }
@@ -483,6 +486,7 @@ function removePanel(panelId) {
     renderPanelStrip();
   }
 
+  renderSidebar();
   saveState();
 }
 
