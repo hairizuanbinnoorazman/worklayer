@@ -128,6 +128,7 @@ function renderSidebar() {
   profile.groups.forEach(group => {
     const item = document.createElement('div');
     item.className = 'group-item' + (group.id === profile.activeGroupId ? ' active' : '');
+    item.dataset.groupId = group.id;
 
     const label = document.createElement('span');
     label.className = 'group-label';
@@ -156,6 +157,7 @@ function renderSidebar() {
     item.appendChild(count);
     item.appendChild(del);
     item.addEventListener('click', () => selectGroup(group.id));
+    initGroupDrag(item);
     list.appendChild(item);
   });
 
