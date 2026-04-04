@@ -159,6 +159,20 @@ function getActiveGroup() {
   return profile.groups.find(g => g.id === profile.activeGroupId) || null;
 }
 
+function getGroupById(groupId) {
+  const profile = getActiveProfile();
+  if (!profile) return null;
+  return profile.groups.find(g => g.id === groupId) || null;
+}
+
+function resolveTargetGroup(targetGroupId) {
+  if (targetGroupId) {
+    const group = getGroupById(targetGroupId);
+    if (group) return group;
+  }
+  return getActiveGroup();
+}
+
 // ── Group operations ──────────────────────────────
 
 function addGroup() {
@@ -339,8 +353,8 @@ async function addPanel(type) {
   saveState();
 }
 
-function addWebPanelAt(url, insertIndex) {
-  const group = getActiveGroup();
+function addWebPanelAt(url, insertIndex, targetGroupId) {
+  const group = resolveTargetGroup(targetGroupId);
   if (!group) return null;
 
   const profile = getActiveProfile();
@@ -362,49 +376,73 @@ function addWebPanelAt(url, insertIndex) {
   group.panels.splice(idx, 0, panel);
 
   const activeGId = getActiveGroupId();
-  const cached = getCachedContainer(activeGId);
-  if (cached) {
-    const panelEls = cached.querySelectorAll('.panel');
-    const addControls = cached.querySelector('.add-panel-controls');
-    const panelEl = createPanelElement(panel);
-    const resizeHandle = createResizeHandle(panel.id);
+  const isActiveGroup = group.id === activeGId;
 
-    if (idx < panelEls.length) {
-      cached.insertBefore(panelEl, panelEls[idx]);
-      cached.insertBefore(resizeHandle, panelEls[idx]);
-    } else if (addControls) {
-      cached.insertBefore(panelEl, addControls);
-      cached.insertBefore(resizeHandle, addControls);
+  if (isActiveGroup) {
+    const cached = getCachedContainer(activeGId);
+    if (cached) {
+      const panelEls = cached.querySelectorAll('.panel');
+      const addControls = cached.querySelector('.add-panel-controls');
+      const panelEl = createPanelElement(panel);
+      const resizeHandle = createResizeHandle(panel.id);
+
+      if (idx < panelEls.length) {
+        cached.insertBefore(panelEl, panelEls[idx]);
+        cached.insertBefore(resizeHandle, panelEls[idx]);
+      } else if (addControls) {
+        cached.insertBefore(panelEl, addControls);
+        cached.insertBefore(resizeHandle, addControls);
+      } else {
+        removeCachedGroup(activeGId);
+        renderPanelStrip();
+        saveState();
+        return panel.id;
+      }
+      renderStatusBar();
     } else {
-      removeCachedGroup(activeGId);
       renderPanelStrip();
-      saveState();
-      return panel.id;
+    }
+  } else {
+    // Non-active group: insert into cached DOM if available
+    const cached = getCachedContainer(group.id);
+    if (cached) {
+      const panelEls = cached.querySelectorAll('.panel');
+      const addControls = cached.querySelector('.add-panel-controls');
+      const panelEl = createPanelElement(panel);
+      const resizeHandle = createResizeHandle(panel.id);
+
+      if (idx < panelEls.length) {
+        cached.insertBefore(panelEl, panelEls[idx]);
+        cached.insertBefore(resizeHandle, panelEls[idx]);
+      } else if (addControls) {
+        cached.insertBefore(panelEl, addControls);
+        cached.insertBefore(resizeHandle, addControls);
+      } else {
+        removeCachedGroup(group.id);
+      }
     }
     renderStatusBar();
-  } else {
-    renderPanelStrip();
   }
 
   saveState();
   return panel.id;
 }
 
-function addWebPanelAfter(sourcePanelId, url) {
-  const group = getActiveGroup();
+function addWebPanelAfter(sourcePanelId, url, targetGroupId) {
+  const group = resolveTargetGroup(targetGroupId);
   if (!group) return null;
   const sourceIndex = group.panels.findIndex(p => p.id === sourcePanelId);
   if (sourceIndex === -1) {
-    return addWebPanelAt(url, group.panels.length);
+    return addWebPanelAt(url, group.panels.length, targetGroupId);
   } else {
-    return addWebPanelAt(url, sourceIndex + 1);
+    return addWebPanelAt(url, sourceIndex + 1, targetGroupId);
   }
 }
 
-function addWebPanelAtEnd(url) {
-  const group = getActiveGroup();
+function addWebPanelAtEnd(url, targetGroupId) {
+  const group = resolveTargetGroup(targetGroupId);
   if (!group) return null;
-  return addWebPanelAt(url, group.panels.length);
+  return addWebPanelAt(url, group.panels.length, targetGroupId);
 }
 
 function removePanel(panelId) {

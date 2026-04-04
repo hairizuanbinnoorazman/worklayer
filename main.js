@@ -557,7 +557,8 @@ function setupBrowserHelperScripts() {
 URL="$1"
 if [ -z "$URL" ]; then exit 0; fi
 TERM_ID="$WORKLAYER_TERM_ID"
-curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&url=$(printf '%s' "$URL" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
+GROUP_ID="$WORKLAYER_GROUP_ID"
+curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&groupId=$GROUP_ID&url=$(printf '%s' "$URL" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
 `;
   fs.writeFileSync(worklayerBrowserPath, worklayerBrowserScript, { mode: 0o755 });
 
@@ -588,7 +589,8 @@ for arg in "$@"; do
 done
 if [ "$IS_URL" = "1" ] && [ -n "$TARGET" ]; then
   TERM_ID="$WORKLAYER_TERM_ID"
-  curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&url=$(printf '%s' "$TARGET" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
+  GROUP_ID="$WORKLAYER_GROUP_ID"
+  curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${browserInterceptToken}&termId=$TERM_ID&groupId=$GROUP_ID&url=$(printf '%s' "$TARGET" | sed 's/ /%20/g; s/&/%26/g; s/?/%3F/g; s/#/%23/g')" 2>/dev/null
 else
   /usr/bin/open $PASSTHROUGH_ARGS "$TARGET"
 fi
@@ -628,6 +630,7 @@ function startBrowserInterceptServer() {
         if (parsedUrl.pathname === '/open') {
           const termId = parsedUrl.searchParams.get('termId');
           const openUrl = parsedUrl.searchParams.get('url');
+          const groupId = parsedUrl.searchParams.get('groupId');
           if (!openUrl) {
             res.writeHead(400);
             res.end();
@@ -640,6 +643,7 @@ function startBrowserInterceptServer() {
             wins[0].webContents.send('terminal:browser-open', {
               termId: termId ? parseInt(termId, 10) : null,
               url: openUrl,
+              groupId: groupId || null,
             });
           }
           res.writeHead(200);
@@ -747,6 +751,7 @@ function startBrowserInterceptServer() {
                   requestId,
                   url: panelUrl,
                   termId: reqTermId !== undefined ? reqTermId : null,
+                  groupId: reqGroupId || null,
                 });
               } else {
                 pendingPanelCallbacks.delete(requestId);

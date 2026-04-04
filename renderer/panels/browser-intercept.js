@@ -1,7 +1,7 @@
 // browser-intercept.js — Opens URLs from terminal CLI tools as web panels
 
 (function () {
-  window.electronAPI.onTerminalBrowserOpen(({ termId, url }) => {
+  window.electronAPI.onTerminalBrowserOpen(({ termId, url, groupId }) => {
     if (!url) return;
 
     // Find the panelId that owns this termId
@@ -14,14 +14,14 @@
     }
 
     if (panelId) {
-      addWebPanelAfter(panelId, url);
+      addWebPanelAfter(panelId, url, groupId);
     } else {
-      addWebPanelAtEnd(url);
+      addWebPanelAtEnd(url, groupId);
     }
   });
 
   // MCP open_panel: create a web panel on request from main process
-  window.electronAPI.onPanelCreateRequest(({ requestId, url, termId }) => {
+  window.electronAPI.onPanelCreateRequest(({ requestId, url, termId, groupId }) => {
     try {
       let sourcePanelId = null;
       if (termId !== null && termId !== undefined) {
@@ -33,8 +33,8 @@
         }
       }
       const newPanelId = sourcePanelId
-        ? addWebPanelAfter(sourcePanelId, url)
-        : addWebPanelAtEnd(url);
+        ? addWebPanelAfter(sourcePanelId, url, groupId)
+        : addWebPanelAtEnd(url, groupId);
       window.electronAPI.panelCreateResponse(requestId, newPanelId, null);
     } catch (e) {
       window.electronAPI.panelCreateResponse(requestId, null, e.message);
