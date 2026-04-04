@@ -7,6 +7,17 @@ const DEFAULT_FILE_WIDTH = 900;
 const MAX_TERMINAL_PANELS = 20;
 const MAX_WEB_PANELS = 20;
 const MAX_FILE_PANELS = 10;
+
+function getProfileMaxPanels(profile) {
+  const defaults = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  if (!profile || !profile.maxPanels) return defaults;
+  return {
+    terminal: profile.maxPanels.terminal ?? defaults.terminal,
+    web: profile.maxPanels.web ?? defaults.web,
+    file: profile.maxPanels.file ?? defaults.file,
+  };
+}
+
 const MAX_URL_HISTORY = 100;
 const MAX_URL_COUNT = 10;
 const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -73,6 +84,9 @@ function migrateProfile(profile) {
   if (!profile.groups.find(g => g.id === profile.activeGroupId)) {
     profile.activeGroupId = profile.groups[0]?.id || null;
   }
+  if (!profile.maxPanels) {
+    profile.maxPanels = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  }
 }
 
 async function init() {
@@ -122,6 +136,7 @@ async function init() {
         groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
         templates: [],
         urlHistory: [],
+        maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
       }],
     };
   }
@@ -302,11 +317,11 @@ async function addPanel(type) {
 
   const profile = getActiveProfile();
   if (!profile) return;
-  const maxLimits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  const maxLimits = getProfileMaxPanels(profile);
   const maxForType = maxLimits[type];
   const profileCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === type).length;
   if (maxForType && profileCount >= maxForType) {
-    showPanelLimitNotification(type);
+    showPanelLimitNotification(type, maxForType);
     return;
   }
 
@@ -360,9 +375,10 @@ function addWebPanelAt(url, insertIndex, targetGroupId) {
 
   const profile = getActiveProfile();
   if (!profile) return null;
+  const maxLimits = getProfileMaxPanels(profile);
   const profileWebCount = profile.groups.flatMap(g => g.panels).filter(p => p.type === 'web').length;
-  if (profileWebCount >= MAX_WEB_PANELS) {
-    showPanelLimitNotification('web');
+  if (profileWebCount >= maxLimits.web) {
+    showPanelLimitNotification('web', maxLimits.web);
     return null;
   }
 
@@ -712,6 +728,7 @@ function addProfile(name) {
     groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
     templates: [],
     urlHistory: [],
+    maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
   };
 
   teardownCurrentProfile();

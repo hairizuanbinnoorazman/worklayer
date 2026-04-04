@@ -7,10 +7,11 @@ function renderStatusBar() {
   const profile = getActiveProfile();
   const allPanels = profile ? profile.groups.flatMap(g => g.panels) : [];
 
+  const maxLimits = getProfileMaxPanels(profile);
   const types = [
-    { type: 'terminal', label: 'Terminal', max: MAX_TERMINAL_PANELS },
-    { type: 'web', label: 'Web', max: MAX_WEB_PANELS },
-    { type: 'file', label: 'Files', max: MAX_FILE_PANELS },
+    { type: 'terminal', label: 'Terminal', max: maxLimits.terminal },
+    { type: 'web', label: 'Web', max: maxLimits.web },
+    { type: 'file', label: 'Files', max: maxLimits.file },
   ];
 
   const profileLabel = profile ? `<span class="status-bar-item status-bar-profile">${profile.name}</span>` : '';
