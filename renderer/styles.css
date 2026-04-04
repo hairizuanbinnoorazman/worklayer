@@ -144,6 +144,7 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 6px 0;
+  position: relative;
 }
 
 .group-list::-webkit-scrollbar { width: 4px; }
@@ -154,7 +155,7 @@ body {
   display: flex;
   align-items: center;
   padding: 7px 10px;
-  cursor: pointer;
+  cursor: grab;
   border-radius: 5px;
   margin: 2px 6px;
   transition: background 0.12s;
@@ -215,6 +216,23 @@ body {
 .group-item:hover .group-delete-btn,
 .group-item.active .group-delete-btn { opacity: 1; }
 .group-delete-btn:hover { color: #ff6b6b; }
+
+.group-item.dragging {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.group-drop-indicator {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  background: #533483;
+  border-radius: 1px;
+  z-index: 200;
+  pointer-events: none;
+  display: none;
+}
 
 .add-group-btn {
   margin: 8px;
