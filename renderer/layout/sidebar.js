@@ -96,8 +96,18 @@ function renderSidebar() {
     }
   });
 
+  const settingsProfileBtn = document.createElement('button');
+  settingsProfileBtn.className = 'profile-action-btn';
+  settingsProfileBtn.textContent = '\u2699';
+  settingsProfileBtn.title = 'Profile settings';
+  settingsProfileBtn.addEventListener('click', () => {
+    if (!profile) return;
+    showProfileSettingsModal(profile);
+  });
+
   profileActions.appendChild(addProfileBtn);
   profileActions.appendChild(renameProfileBtn);
+  profileActions.appendChild(settingsProfileBtn);
   profileActions.appendChild(deleteProfileBtn);
 
   profileSection.appendChild(profileSelect);

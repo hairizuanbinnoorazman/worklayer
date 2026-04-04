@@ -1,10 +1,12 @@
 // panel-limit-modal.js - Notification popup when panel limit is reached
 
-function showPanelLimitNotification(type) {
+function showPanelLimitNotification(type, limit) {
   if (document.querySelector('.panel-limit-overlay')) return;
 
-  const limits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
-  const limit = limits[type] || '?';
+  if (limit == null) {
+    const limits = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+    limit = limits[type] || '?';
+  }
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay panel-limit-overlay';
