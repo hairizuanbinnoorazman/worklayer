@@ -30,6 +30,9 @@ const activeTerminals = new Map();
 // Map<panelId, { editor, dispose }>
 const activeEditors = new Map();
 
+// Map<panelId, { cleanup }>
+const activeWebPanels = new Map();
+
 // Map<serverId, { groupId, serverKey, cleanup }>
 const activeLspServers = new Map();
 
@@ -306,6 +309,10 @@ function killGroupTerminals(group) {
       const { dispose } = activeEditors.get(p.id);
       if (dispose) dispose();
     }
+    if (p.type === 'web' && activeWebPanels.has(p.id)) {
+      const { cleanup } = activeWebPanels.get(p.id);
+      if (cleanup) cleanup();
+    }
   });
 }
 
@@ -478,6 +485,10 @@ function removePanel(panelId) {
   if (activeEditors.has(panelId)) {
     const { dispose } = activeEditors.get(panelId);
     if (dispose) dispose();
+  }
+  if (activeWebPanels.has(panelId)) {
+    const { cleanup } = activeWebPanels.get(panelId);
+    if (cleanup) cleanup();
   }
 
   group.panels = group.panels.filter(p => p.id !== panelId);
@@ -701,6 +712,7 @@ function teardownCurrentProfile() {
   // Clear active maps
   activeTerminals.clear();
   activeEditors.clear();
+  activeWebPanels.clear();
   activeLspServers.clear();
 
   // Destroy all panel searches
