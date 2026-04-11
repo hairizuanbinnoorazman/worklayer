@@ -456,4 +456,18 @@ function renderWebPanel(panel, container) {
       }
     }
   });
+
+  // Cleanup function — mirrors the pattern used by mountTerminal() in term-panel.js
+  const cleanup = () => {
+    const wcId = webview._webContentsId;
+    if (wcId !== undefined) {
+      webviewRegistry.delete(wcId);
+      if (window.electronAPI.cdpUnregisterWebview) {
+        window.electronAPI.cdpUnregisterWebview(wcId);
+      }
+    }
+    destroyPanelSearch(panel.id);
+    activeWebPanels.delete(panel.id);
+  };
+  activeWebPanels.set(panel.id, { cleanup });
 }
