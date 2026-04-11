@@ -1019,6 +1019,20 @@ app.whenReady().then(async () => {
           label: 'Copy Page URL',
           click: () => clipboard.writeText(contents.getURL()),
         });
+        menuTemplate.push({ type: 'separator' });
+        menuTemplate.push({
+          label: 'Bookmark This Page',
+          click: () => {
+            const host = contents.hostWebContents;
+            if (host && !host.isDestroyed()) {
+              host.send('webview:bookmark-page', {
+                webContentsId: contents.id,
+                url: contents.getURL(),
+                title: contents.getTitle(),
+              });
+            }
+          },
+        });
 
         const menu = Menu.buildFromTemplate(menuTemplate);
         menu.popup();

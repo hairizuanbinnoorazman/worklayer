@@ -69,6 +69,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('webview:open-in-new-panel', listener);
     return () => ipcRenderer.removeListener('webview:open-in-new-panel', listener);
   },
+  onWebviewBookmarkPage: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:bookmark-page', listener);
+    return () => ipcRenderer.removeListener('webview:bookmark-page', listener);
+  },
   searchFindInPage: (webContentsId, text, options) =>
     ipcRenderer.invoke('search:findInPage', { webContentsId, text, options }),
   searchStopFindInPage: (webContentsId, action) =>
