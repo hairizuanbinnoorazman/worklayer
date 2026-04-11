@@ -69,6 +69,7 @@ function getActiveGroupId() {
 function migrateProfile(profile) {
   if (!profile.templates) profile.templates = [];
   if (!profile.urlHistory) profile.urlHistory = [];
+  if (!profile.bookmarks) profile.bookmarks = [];
   for (const entry of profile.urlHistory) {
     if (!entry.count) entry.count = 1;
     if (!entry.lastAccessed) entry.lastAccessed = entry.timestamp || Date.now();
@@ -136,6 +137,7 @@ async function init() {
         groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
         templates: [],
         urlHistory: [],
+        bookmarks: [],
         maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
       }],
     };
@@ -682,6 +684,42 @@ function applyUrlHistoryDecay() {
   if (changed) saveState();
 }
 
+// ── Bookmark operations ──────────────────────────
+
+function addBookmark(url, title) {
+  const profile = getActiveProfile();
+  if (!profile) return null;
+  if (profile.bookmarks.some(b => b.url === url)) return null;
+  const bookmark = { id: generateId(), url, title: title || '', addedAt: Date.now() };
+  profile.bookmarks.push(bookmark);
+  saveState();
+  return bookmark;
+}
+
+function removeBookmark(bookmarkId) {
+  const profile = getActiveProfile();
+  if (!profile) return;
+  profile.bookmarks = profile.bookmarks.filter(b => b.id !== bookmarkId);
+  saveState();
+}
+
+function getFilteredBookmarks(query) {
+  const profile = getActiveProfile();
+  if (!profile) return [];
+  const q = (query || '').toLowerCase().trim();
+  let results = profile.bookmarks;
+  if (q) {
+    results = results.filter(b => b.url.toLowerCase().includes(q) || (b.title && b.title.toLowerCase().includes(q)));
+  }
+  return results.slice().sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+}
+
+function isBookmarked(url) {
+  const profile = getActiveProfile();
+  if (!profile) return false;
+  return profile.bookmarks.some(b => b.url === url);
+}
+
 // ── Profile operations ────────────────────────────
 
 function teardownCurrentProfile() {
@@ -728,6 +766,7 @@ function addProfile(name) {
     groups: [{ id: groupId, label: 'Work 1', panels: [], lspServers: [] }],
     templates: [],
     urlHistory: [],
+    bookmarks: [],
     maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
   };
 

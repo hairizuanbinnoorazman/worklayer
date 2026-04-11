@@ -26,6 +26,25 @@ if (window.electronAPI.onWebviewOpenInNewPanel) {
     }
   });
 }
+if (window.electronAPI.onWebviewBookmarkPage) {
+  window.electronAPI.onWebviewBookmarkPage(({ webContentsId, url, title }) => {
+    if (!url || url === 'about:blank' || url.startsWith('data:')) return;
+    const entry = webviewRegistry.get(webContentsId);
+    if (!entry) return;
+    if (!isBookmarked(url)) {
+      addBookmark(url, title);
+    }
+    // Update the star button for the relevant panel
+    const panelEl = document.querySelector(`[data-panel-id="${entry.panelId}"]`);
+    if (panelEl) {
+      const bmBtn = panelEl.querySelector('.bookmark-btn');
+      if (bmBtn) {
+        bmBtn.textContent = '\u2605';
+        bmBtn.classList.add('bookmarked');
+      }
+    }
+  });
+}
 
 function isAbortedError(err) {
   return err && err.message && err.message.includes('ERR_ABORTED');
@@ -67,6 +86,11 @@ function renderWebPanel(panel, container) {
   refreshBtn.textContent = '\u21bb';
   refreshBtn.title = 'Refresh';
 
+  const bookmarkBtn = document.createElement('button');
+  bookmarkBtn.className = 'nav-btn bookmark-btn';
+  bookmarkBtn.textContent = '\u2606';
+  bookmarkBtn.title = 'Bookmark this page';
+
   const urlInputWrapper = document.createElement('div');
   urlInputWrapper.className = 'url-input-wrapper';
 
@@ -85,6 +109,7 @@ function renderWebPanel(panel, container) {
   urlBar.appendChild(backBtn);
   urlBar.appendChild(forwardBtn);
   urlBar.appendChild(refreshBtn);
+  urlBar.appendChild(bookmarkBtn);
   urlBar.appendChild(urlInputWrapper);
   container.appendChild(urlBar);
 
@@ -153,6 +178,124 @@ function renderWebPanel(panel, container) {
   // wrapper hasn't been appended to the panel strip yet.
   webview.src = initialUrl;
 
+  // ── Bookmark overlay ────────────────────────────
+  container.style.position = 'relative';
+
+  const bookmarkOverlay = document.createElement('div');
+  bookmarkOverlay.className = 'bookmark-overlay';
+  bookmarkOverlay.hidden = true;
+
+  const bmSearchInput = document.createElement('input');
+  bmSearchInput.type = 'text';
+  bmSearchInput.className = 'bookmark-search-input';
+  bmSearchInput.placeholder = 'Search bookmarks...';
+
+  const bmGrid = document.createElement('div');
+  bmGrid.className = 'bookmark-grid';
+
+  bookmarkOverlay.appendChild(bmSearchInput);
+  bookmarkOverlay.appendChild(bmGrid);
+  container.appendChild(bookmarkOverlay);
+
+  function updateBookmarkOverlay() {
+    const query = bmSearchInput.value;
+    const bookmarks = getFilteredBookmarks(query);
+    bmGrid.innerHTML = '';
+
+    if (bookmarks.length === 0) {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.className = 'bookmark-empty';
+      emptyMsg.textContent = query
+        ? 'No matching bookmarks.'
+        : 'No bookmarks yet. Navigate to a page and click \u2606 to add one.';
+      bmGrid.appendChild(emptyMsg);
+      return;
+    }
+
+    bookmarks.forEach(bm => {
+      const tile = document.createElement('div');
+      tile.className = 'bookmark-tile';
+
+      const iconEl = document.createElement('div');
+      iconEl.className = 'bookmark-tile-icon';
+      try {
+        const domain = new URL(bm.url).hostname;
+        iconEl.textContent = domain.replace(/^www\./, '').charAt(0).toUpperCase();
+      } catch { iconEl.textContent = '?'; }
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'bookmark-tile-title';
+      titleEl.textContent = bm.title || bm.url;
+      titleEl.title = bm.title || bm.url;
+
+      const urlEl = document.createElement('div');
+      urlEl.className = 'bookmark-tile-url';
+      try { urlEl.textContent = new URL(bm.url).hostname; } catch { urlEl.textContent = bm.url; }
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'bookmark-tile-delete';
+      deleteBtn.textContent = '\u00d7';
+      deleteBtn.title = 'Remove bookmark';
+      deleteBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        removeBookmark(bm.id);
+        updateBookmarkOverlay();
+      });
+
+      tile.appendChild(deleteBtn);
+      tile.appendChild(iconEl);
+      tile.appendChild(titleEl);
+      tile.appendChild(urlEl);
+
+      tile.addEventListener('click', () => navigate(bm.url));
+      bmGrid.appendChild(tile);
+    });
+  }
+
+  function showBookmarkOverlay() {
+    bookmarkOverlay.hidden = false;
+    bmSearchInput.value = '';
+    updateBookmarkOverlay();
+  }
+
+  function hideBookmarkOverlay() {
+    bookmarkOverlay.hidden = true;
+  }
+
+  bmSearchInput.addEventListener('input', () => updateBookmarkOverlay());
+  bmSearchInput.addEventListener('mousedown', e => e.stopPropagation());
+
+  if (initialUrl === 'about:blank') showBookmarkOverlay();
+
+  // ── Bookmark button logic ───────────────────────
+  function updateBookmarkBtn() {
+    const currentUrl = urlInput.value;
+    if (!currentUrl || currentUrl === 'about:blank' || currentUrl.startsWith('data:')) {
+      bookmarkBtn.style.display = 'none';
+      return;
+    }
+    bookmarkBtn.style.display = '';
+    const marked = isBookmarked(currentUrl);
+    bookmarkBtn.textContent = marked ? '\u2605' : '\u2606';
+    bookmarkBtn.classList.toggle('bookmarked', marked);
+  }
+
+  bookmarkBtn.addEventListener('click', () => {
+    const currentUrl = urlInput.value;
+    if (!currentUrl || currentUrl === 'about:blank') return;
+    if (isBookmarked(currentUrl)) {
+      const profile = getActiveProfile();
+      const bm = profile.bookmarks.find(b => b.url === currentUrl);
+      if (bm) removeBookmark(bm.id);
+    } else {
+      const title = webview.getTitle ? webview.getTitle() : '';
+      addBookmark(currentUrl, title);
+    }
+    updateBookmarkBtn();
+  });
+
+  updateBookmarkBtn();
+
   console.log(`[WebPanel] Created webview panel=${panel.id} url=${panel.url || 'about:blank'} partition=persist:webpanels`);
 
   let lastRealUrl = panel.url || '';
@@ -220,6 +363,7 @@ function renderWebPanel(panel, container) {
   const navigate = (raw) => {
     let url = raw.trim();
     if (!url) return;
+    hideBookmarkOverlay();
     if (navigateInFlight) {
       console.log(`[WebPanel] navigate blocked — already in flight panel=${panel.id}`);
       return;
@@ -343,6 +487,13 @@ function renderWebPanel(panel, container) {
         window.electronAPI.cdpUpdateWebview(webview._webContentsId, e.url, undefined);
       }
     }
+    // Show/hide bookmark overlay based on URL
+    if (e.url === 'about:blank') {
+      showBookmarkOverlay();
+    } else {
+      hideBookmarkOverlay();
+    }
+    updateBookmarkBtn();
     if (window.electronAPI.debugGetCookieCount) {
       window.electronAPI.debugGetCookieCount().then(info => {
         console.log(`[WebPanel] Cookies after navigate: total=${info.total} session=${info.session} persistent=${info.persistent}`);
@@ -357,6 +508,7 @@ function renderWebPanel(panel, container) {
       updatePanelUrl(panel.id, e.url);
       addToUrlHistory(e.url, '');
     }
+    updateBookmarkBtn();
   });
 
   webview.addEventListener('did-fail-load', e => {
