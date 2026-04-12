@@ -865,6 +865,31 @@ app.whenReady().then(async () => {
     debugLog('[CookieRestore] Fatal error:', e.message, e.stack);
   }
 
+  // Strip anti-framing headers so webview panels can load any site.
+  // Only affects the 'persist:webpanels' session — main window is untouched.
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const headers = Object.assign({}, details.responseHeaders);
+
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'x-frame-options') {
+        delete headers[key];
+      }
+      if (key.toLowerCase() === 'content-security-policy') {
+        headers[key] = headers[key].map(policy =>
+          policy
+            .split(';')
+            .map(d => d.trim())
+            .filter(d => !d.toLowerCase().startsWith('frame-ancestors'))
+            .join('; ')
+        ).filter(p => p.length > 0);
+        if (headers[key].length === 0) delete headers[key];
+      }
+    }
+
+    callback({ cancel: false, responseHeaders: headers });
+  });
+  debugLog('[WebPanels] Registered onHeadersReceived to strip anti-framing headers');
+
   // Log webview render process crashes
   app.on('web-contents-created', (_, contents) => {
     debugLog('[web-contents-created] type:', contents.getType());
