@@ -2,10 +2,43 @@
   "name": "worklayer",
   "version": "1.0.0",
   "description": "Panel viewer with workspaces",
+  "author": "Hairizuan Noorazman",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "rebuild-pty": "node node_modules/@electron/rebuild/lib/cli.js -f -w node-pty"
+    "rebuild-pty": "node node_modules/@electron/rebuild/lib/cli.js -f -w node-pty",
+    "build": "electron-builder --mac",
+    "build:dir": "electron-builder --mac --dir"
+  },
+  "build": {
+    "appId": "com.worklayer.app",
+    "productName": "Worklayer",
+    "asar": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "identity": null
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lsp-manager.js",
+      "renderer/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "dmg": {
+      "title": "Worklayer",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -17,6 +50,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
-    "electron": "^28.0.0"
+    "electron": "^28.0.0",
+    "electron-builder": "^26.8.1"
   }
 }
