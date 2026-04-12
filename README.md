@@ -35,6 +35,7 @@ Inspired by [Niri](https://wiki.archlinux.org/title/Niri)'s scrollable tiling wi
 worklayer/
 ├── main.js                        Electron main process
 ├── preload.js                     IPC bridge (contextBridge)
+├── lsp-manager.js                 LSP server lifecycle management
 ├── package.json
 ├── renderer/
 │   ├── index.html                 App shell
@@ -43,7 +44,8 @@ worklayer/
 │   │   ├── app.js                 State management and core operations
 │   │   └── group-cache.js         DOM caching mechanism
 │   ├── layout/
-│   │   └── sidebar.js             Workspace sidebar component
+│   │   ├── sidebar.js             Workspace sidebar component
+│   │   └── group-drag.js          Workspace drag-to-reorder
 │   ├── panels/
 │   │   ├── panel-strip.js         Horizontal panel area component
 │   │   ├── web-panel.js           Web panel (webview) component
@@ -56,6 +58,8 @@ worklayer/
 │   ├── modals/
 │   │   ├── workspace-modal.js     Modal for creating/configuring workspaces
 │   │   ├── panel-settings-modal.js  Per-panel settings modal
+│   │   ├── panel-limit-modal.js   Panel limit configuration modal
+│   │   ├── profile-settings-modal.js  Profile settings modal
 │   │   ├── lsp-settings-modal.js  Per-workspace LSP config modal
 │   │   └── auth-modal.js          HTTP auth dialog
 │   └── lsp/
@@ -78,8 +82,10 @@ worklayer/
 | `@xterm/xterm` ^6 | Terminal UI in the renderer |
 | `@xterm/addon-fit` ^0.11 | Resizes xterm to fill its container |
 | `@xterm/addon-search` ^0.16 | Search within terminal output |
+| `@xterm/addon-web-links` ^0.12 | Clickable links in terminal output |
 | `monaco-editor` ^0.55 | Code editor and syntax highlighting |
 | `@electron/rebuild` ^4 | Rebuilds native modules for the installed Electron version |
+| `electron-builder` ^26 | Packages the app as a macOS DMG |
 | `@modelcontextprotocol/sdk` ^1.27 | MCP server (in mcp-server/) |
 
 ## Setup
@@ -90,6 +96,15 @@ node node_modules/electron/install.js        # download Electron binary
 npm run rebuild-pty                          # rebuild node-pty for Electron
 npm start
 ```
+
+### Building the macOS App
+
+```bash
+npm run build           # build a signed DMG (arm64)
+npm run build:dir       # build to dist/ directory without packaging
+```
+
+The DMG is written to `dist/` and targets Apple Silicon (arm64).
 
 ### MCP Server
 
