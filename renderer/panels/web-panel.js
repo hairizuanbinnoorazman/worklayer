@@ -254,12 +254,14 @@ function renderWebPanel(panel, container) {
 
   function showBookmarkOverlay() {
     bookmarkOverlay.hidden = false;
+    webview.classList.add('webview-hidden');
     bmSearchInput.value = '';
     updateBookmarkOverlay();
   }
 
   function hideBookmarkOverlay() {
     bookmarkOverlay.hidden = true;
+    webview.classList.remove('webview-hidden');
   }
 
   bmSearchInput.addEventListener('input', () => updateBookmarkOverlay());

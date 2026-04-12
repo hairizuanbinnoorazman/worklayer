@@ -1555,6 +1555,14 @@ webview {
   margin-left: 3px;
 }
 
+webview.webview-hidden {
+  visibility: hidden;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 /* ── Bookmark overlay ──────────────────────────── */
 
 .bookmark-overlay {
