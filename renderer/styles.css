@@ -691,6 +691,15 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
   100% { background-position: -100% 0; }
 }
 
+.webview-wrapper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 webview {
   flex: 1;
   width: 100%;

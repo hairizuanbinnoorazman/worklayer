@@ -172,14 +172,16 @@ function renderWebPanel(panel, container) {
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', 'persist:webpanels');
   const initialUrl = panel.url || 'about:blank';
-  container.appendChild(webview);
+  const webviewWrapper = document.createElement('div');
+  webviewWrapper.className = 'webview-wrapper';
+  container.appendChild(webviewWrapper);
+  webviewWrapper.appendChild(webview);
   // Use src attribute for initial load — loadURL() requires the webview to be
   // attached to the live DOM with dom-ready fired, but at this point the
   // wrapper hasn't been appended to the panel strip yet.
   webview.src = initialUrl;
 
   // ── Bookmark overlay ────────────────────────────
-  container.style.position = 'relative';
 
   const bookmarkOverlay = document.createElement('div');
   bookmarkOverlay.className = 'bookmark-overlay';
@@ -195,7 +197,7 @@ function renderWebPanel(panel, container) {
 
   bookmarkOverlay.appendChild(bmSearchInput);
   bookmarkOverlay.appendChild(bmGrid);
-  container.appendChild(bookmarkOverlay);
+  webviewWrapper.appendChild(bookmarkOverlay);
 
   function updateBookmarkOverlay() {
     const query = bmSearchInput.value;
@@ -307,13 +309,12 @@ function renderWebPanel(panel, container) {
 
   // DOM-based error overlay shown when webview.loadURL() itself is broken
   function showErrorOverlay(url, errorDescription) {
-    let overlay = container.querySelector('.webview-error-overlay');
+    let overlay = webviewWrapper.querySelector('.webview-error-overlay');
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.className = 'webview-error-overlay';
       overlay.style.cssText = 'position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:#1e1e2e;color:#cdd6f4;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
-      container.style.position = 'relative';
-      container.appendChild(overlay);
+      webviewWrapper.appendChild(overlay);
     }
     const retryUrl = url || lastRealUrl || '';
     overlay.innerHTML = `
@@ -335,7 +336,7 @@ function renderWebPanel(panel, container) {
   }
 
   function removeErrorOverlay() {
-    const overlay = container.querySelector('.webview-error-overlay');
+    const overlay = webviewWrapper.querySelector('.webview-error-overlay');
     if (overlay) overlay.remove();
   }
 
