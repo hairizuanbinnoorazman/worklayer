@@ -19,6 +19,12 @@ async function mountTerminal(panel, container) {
   }
 
   // Create a new xterm Terminal
+  const openLinkInPanel = (url) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      addWebPanelAfter(panel.id, url);
+    }
+  };
+
   const terminal = new Terminal({
     cursorBlink: true,
     fontSize: 13,
@@ -30,6 +36,9 @@ async function mountTerminal(panel, container) {
       selectionBackground: '#3d2b6e',
     },
     scrollback: 5000,
+    linkHandler: {
+      activate: (_event, text) => openLinkInPanel(text),
+    },
   });
 
   const fitAddon = new FitAddon.FitAddon();
@@ -37,6 +46,9 @@ async function mountTerminal(panel, container) {
 
   const searchAddon = new SearchAddon.SearchAddon();
   terminal.loadAddon(searchAddon);
+
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon((_event, url) => openLinkInPanel(url));
+  terminal.loadAddon(webLinksAddon);
 
   terminal.open(container);
 
