@@ -69,6 +69,7 @@ async function mountTerminal(panel, container) {
     initialCommand: panel.initialCommand || undefined,
     profileId: getActiveProfile()?.id,
     groupId: getActiveGroupId(),
+    interceptPdf: getProfileInterceptPdf(getActiveProfile()),
   });
 
   if (error) {

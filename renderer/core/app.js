@@ -18,6 +18,11 @@ function getProfileMaxPanels(profile) {
   };
 }
 
+function getProfileInterceptPdf(profile) {
+  if (!profile || profile.interceptPdf === undefined) return true;
+  return !!profile.interceptPdf;
+}
+
 const MAX_URL_HISTORY = 100;
 const MAX_URL_COUNT = 10;
 const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week

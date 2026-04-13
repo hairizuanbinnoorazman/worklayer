@@ -171,6 +171,7 @@ function renderWebPanel(panel, container) {
   const webview = document.createElement('webview');
   webview.setAttribute('allowpopups', '');
   webview.setAttribute('partition', 'persist:webpanels');
+  webview.setAttribute('webpreferences', 'plugins');
   const initialUrl = panel.url || 'about:blank';
   const webviewWrapper = document.createElement('div');
   webviewWrapper.className = 'webview-wrapper';
@@ -274,7 +275,7 @@ function renderWebPanel(panel, container) {
   // ── Bookmark button logic ───────────────────────
   function updateBookmarkBtn() {
     const currentUrl = urlInput.value;
-    if (!currentUrl || currentUrl === 'about:blank' || currentUrl.startsWith('data:')) {
+    if (!currentUrl || currentUrl === 'about:blank' || currentUrl.startsWith('data:') || currentUrl.startsWith('file://')) {
       bookmarkBtn.style.display = 'none';
       return;
     }
@@ -389,7 +390,7 @@ function renderWebPanel(panel, container) {
     });
     urlInput.value = url;
     updatePanelUrl(panel.id, url);
-    addToUrlHistory(url, '');
+    if (!url.startsWith('file://')) addToUrlHistory(url, '');
   };
 
   backBtn.addEventListener('click', () => webview.goBack());
@@ -485,7 +486,7 @@ function renderWebPanel(panel, container) {
       crashRetryCount = 0;
       urlInput.value = e.url;
       updatePanelUrl(panel.id, e.url);
-      addToUrlHistory(e.url, '');
+      if (!e.url.startsWith('file://')) addToUrlHistory(e.url, '');
       if (window.electronAPI.cdpUpdateWebview && webview._webContentsId) {
         window.electronAPI.cdpUpdateWebview(webview._webContentsId, e.url, undefined);
       }
@@ -509,7 +510,7 @@ function renderWebPanel(panel, container) {
       lastRealUrl = e.url;
       urlInput.value = e.url;
       updatePanelUrl(panel.id, e.url);
-      addToUrlHistory(e.url, '');
+      if (!e.url.startsWith('file://')) addToUrlHistory(e.url, '');
     }
     updateBookmarkBtn();
   });

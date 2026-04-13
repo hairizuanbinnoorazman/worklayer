@@ -119,7 +119,7 @@ ipcMain.handle('state:save', (_, state) => {
 });
 
 // Terminal IPC
-ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand, profileId, groupId }) => {
+ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand, profileId, groupId, interceptPdf }) => {
   if (!pty) return { error: 'node-pty not available. Run: npm run postinstall' };
 
   const id = ++termIdCounter;
@@ -141,6 +141,7 @@ ipcMain.handle('terminal:create', (event, { cols, rows, cwd, initialCommand, pro
   }
   if (profileId) termEnv.WORKLAYER_PROFILE_ID = String(profileId);
   if (groupId) termEnv.WORKLAYER_GROUP_ID = String(groupId);
+  if (interceptPdf !== false) termEnv.WORKLAYER_INTERCEPT_PDF = '1';
 
   const term = pty.spawn(shell, [], {
     name: 'xterm-256color',
@@ -565,7 +566,7 @@ curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${brow
   // open wrapper: intercepts URLs, passes non-URLs to /usr/bin/open
   const openWrapperPath = path.join(browserHelperDir, 'open');
   const openWrapperScript = `#!/bin/sh
-# Worklayer open wrapper — intercepts URL arguments
+# Worklayer open wrapper — intercepts URL arguments and PDF files
 IS_URL=0
 TARGET=""
 PASSTHROUGH_ARGS=""
@@ -574,6 +575,17 @@ for arg in "$@"; do
     http://*|https://*)
       IS_URL=1
       TARGET="$arg"
+      ;;
+    *.pdf|*.PDF)
+      if [ "$WORKLAYER_INTERCEPT_PDF" = "1" ]; then
+        IS_URL=1
+        case "$arg" in
+          /*) TARGET="file://$arg" ;;
+          *)  TARGET="file://$(cd "$(dirname "$arg")" 2>/dev/null && pwd)/$(basename "$arg")" ;;
+        esac
+      else
+        if [ -z "$TARGET" ]; then TARGET="$arg"; else PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"; fi
+      fi
       ;;
     -*)
       PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"
