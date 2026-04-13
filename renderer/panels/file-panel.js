@@ -358,6 +358,11 @@ function renderFilePanel(panel, container) {
 
   async function openFile(filePath, skipDirtyCheck) {
     if (isBinaryFile(filePath)) {
+      const ext = filePath.split('.').pop().toLowerCase();
+      if (ext === 'pdf') {
+        addWebPanelAfter(panel.id, 'file://' + filePath);
+        return;
+      }
       if (currentEditor) {
         currentEditor.setValue('');
         currentEditor.updateOptions({ readOnly: true });

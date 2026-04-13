@@ -47,6 +47,28 @@ function showProfileSettingsModal(profile) {
     container.appendChild(field);
   }
 
+  // ── PDF interception toggle ──
+  const pdfField = document.createElement('div');
+  pdfField.className = 'modal-field';
+  pdfField.style.flexDirection = 'row';
+  pdfField.style.alignItems = 'center';
+  pdfField.style.gap = '8px';
+
+  const pdfCheckbox = document.createElement('input');
+  pdfCheckbox.type = 'checkbox';
+  pdfCheckbox.id = 'intercept-pdf-checkbox';
+  pdfCheckbox.checked = getProfileInterceptPdf(profile);
+
+  const pdfLabel = document.createElement('label');
+  pdfLabel.className = 'modal-label';
+  pdfLabel.setAttribute('for', 'intercept-pdf-checkbox');
+  pdfLabel.textContent = 'Open PDFs in panel';
+  pdfLabel.style.marginBottom = '0';
+
+  pdfField.appendChild(pdfCheckbox);
+  pdfField.appendChild(pdfLabel);
+  container.appendChild(pdfField);
+
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
 
@@ -79,6 +101,7 @@ function showProfileSettingsModal(profile) {
       newMaxPanels[key] = isNaN(val) ? maxPanels[key] : Math.max(0, Math.min(50, val));
     }
     profile.maxPanels = newMaxPanels;
+    profile.interceptPdf = pdfCheckbox.checked;
     saveState();
     renderStatusBar();
     dismiss();
