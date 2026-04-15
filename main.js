@@ -566,7 +566,7 @@ curl -s -o /dev/null "http://127.0.0.1:${browserInterceptPort}/open?token=${brow
   // open wrapper: intercepts URLs, passes non-URLs to /usr/bin/open
   const openWrapperPath = path.join(browserHelperDir, 'open');
   const openWrapperScript = `#!/bin/sh
-# Worklayer open wrapper — intercepts URL arguments and PDF files
+# Worklayer open wrapper — intercepts URL arguments, PDF files, and image files
 IS_URL=0
 TARGET=""
 PASSTHROUGH_ARGS=""
@@ -586,6 +586,13 @@ for arg in "$@"; do
       else
         if [ -z "$TARGET" ]; then TARGET="$arg"; else PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"; fi
       fi
+      ;;
+    *.png|*.PNG|*.jpg|*.JPG|*.jpeg|*.JPEG|*.gif|*.GIF|*.bmp|*.BMP|*.ico|*.ICO|*.webp|*.WEBP|*.svg|*.SVG)
+      IS_URL=1
+      case "$arg" in
+        /*) TARGET="file://$arg" ;;
+        *)  TARGET="file://$(cd "$(dirname "$arg")" 2>/dev/null && pwd)/$(basename "$arg")" ;;
+      esac
       ;;
     -*)
       PASSTHROUGH_ARGS="$PASSTHROUGH_ARGS $arg"
