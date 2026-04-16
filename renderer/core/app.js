@@ -23,6 +23,11 @@ function getProfileInterceptPdf(profile) {
   return !!profile.interceptPdf;
 }
 
+function getProfileSuspendTimeout(profile) {
+  if (!profile || profile.suspendTimeoutMinutes === undefined) return 30;
+  return profile.suspendTimeoutMinutes;
+}
+
 const MAX_URL_HISTORY = 100;
 const MAX_URL_COUNT = 10;
 const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -49,6 +54,11 @@ let focusedPanelId = null;
 function setFocusedPanel(panelId) {
   if (focusedPanelId === panelId) return;
 
+  // Start suspend timer for previous web panel losing focus
+  if (focusedPanelId && activeWebPanels.has(focusedPanelId)) {
+    startSuspendTimer(focusedPanelId);
+  }
+
   // Clear previous
   if (focusedPanelId) {
     const prevEl = document.querySelector(`[data-panel-id="${focusedPanelId}"]`);
@@ -62,6 +72,12 @@ function setFocusedPanel(panelId) {
   if (panelId) {
     const el = document.querySelector(`[data-panel-id="${panelId}"]`);
     if (el) el.classList.add('panel-focused');
+
+    // Stop suspend timer for newly focused web panel; auto-resume if suspended
+    if (activeWebPanels.has(panelId)) {
+      clearSuspendTimer(panelId);
+      if (isSuspended(panelId)) resumePanel(panelId);
+    }
   }
 }
 
@@ -96,6 +112,7 @@ function migrateProfile(profile) {
   if (!profile.maxPanels) {
     profile.maxPanels = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
   }
+  if (profile.suspendTimeoutMinutes === undefined) profile.suspendTimeoutMinutes = 30;
 }
 
 async function init() {
@@ -304,6 +321,7 @@ function selectGroup(groupId) {
   saveState();
   renderSidebar();
   renderPanelStrip();
+  resetTimersForGroup(groupId);
 }
 
 function killGroupTerminals(group) {
@@ -317,6 +335,8 @@ function killGroupTerminals(group) {
       if (dispose) dispose();
     }
     if (p.type === 'web' && activeWebPanels.has(p.id)) {
+      clearSuspendTimer(p.id);
+      suspendedPanels.delete(p.id);
       const { cleanup } = activeWebPanels.get(p.id);
       if (cleanup) cleanup();
     }
@@ -494,6 +514,8 @@ function removePanel(panelId) {
     if (dispose) dispose();
   }
   if (activeWebPanels.has(panelId)) {
+    clearSuspendTimer(panelId);
+    suspendedPanels.delete(panelId);
     const { cleanup } = activeWebPanels.get(panelId);
     if (cleanup) cleanup();
   }
@@ -751,6 +773,10 @@ function teardownCurrentProfile() {
   groupDOMCache.forEach((el) => el.remove());
   groupDOMCache.clear();
   lruOrder.length = 0;
+
+  // Clear suspend state
+  clearAllSuspendTimers();
+  suspendedPanels.clear();
 
   // Clear active maps
   activeTerminals.clear();

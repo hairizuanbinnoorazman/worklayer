@@ -154,6 +154,23 @@ function createPanelElement(panel) {
 
   header.appendChild(typeLabel);
   header.appendChild(settingsBtn);
+
+  if (panel.type === 'web') {
+    const suspendBtn = document.createElement('button');
+    suspendBtn.className = 'panel-suspend-btn';
+    suspendBtn.textContent = '\u23F8';
+    suspendBtn.title = 'Suspend panel';
+    suspendBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (isSuspended(panel.id)) {
+        resumePanel(panel.id);
+      } else {
+        suspendPanel(panel.id);
+      }
+    });
+    header.appendChild(suspendBtn);
+  }
+
   header.appendChild(closeBtn);
   el.appendChild(header);
 

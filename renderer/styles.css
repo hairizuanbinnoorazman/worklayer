@@ -478,6 +478,76 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 
 .panel-settings-btn:hover { color: #ccc; background: #2a2a4e; }
 
+.panel-suspend-btn {
+  background: none;
+  border: none;
+  color: #556;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+.panel-suspend-btn:hover { color: #ccc; background: #2a2a4e; }
+.panel-suspend-btn.suspended { color: #f38ba8; }
+
+.panel-label-suspended { opacity: 0.5; }
+
+/* ── Suspend overlay ─────────────────────────────── */
+
+.suspend-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: #1e1e2e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.suspend-overlay-icon {
+  font-size: 3rem;
+  color: #533483;
+  opacity: 0.7;
+}
+
+.suspend-overlay-text {
+  font-size: 14px;
+  color: #889;
+}
+
+.suspend-overlay-url {
+  font-size: 11px;
+  color: #556;
+  max-width: 80%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.suspend-overlay-resume {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: #3d2b6e;
+  border: 1px solid #533483;
+  color: #e0d0ff;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.suspend-overlay-resume:hover {
+  background: #4d3b8e;
+  border-color: #7355a8;
+  color: #fff;
+}
+
 .panel.dragging {
   opacity: 0.5;
   z-index: 100;

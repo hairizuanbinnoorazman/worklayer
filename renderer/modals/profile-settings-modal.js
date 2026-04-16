@@ -69,6 +69,25 @@ function showProfileSettingsModal(profile) {
   pdfField.appendChild(pdfLabel);
   container.appendChild(pdfField);
 
+  // ── Auto-suspend timeout ──
+  const suspendField = document.createElement('div');
+  suspendField.className = 'modal-field';
+
+  const suspendLabel = document.createElement('label');
+  suspendLabel.className = 'modal-label';
+  suspendLabel.textContent = 'Auto-suspend web panels after (minutes, 0 = off)';
+
+  const suspendInput = document.createElement('input');
+  suspendInput.className = 'modal-input';
+  suspendInput.type = 'number';
+  suspendInput.min = '0';
+  suspendInput.max = '120';
+  suspendInput.value = getProfileSuspendTimeout(profile);
+
+  suspendField.appendChild(suspendLabel);
+  suspendField.appendChild(suspendInput);
+  container.appendChild(suspendField);
+
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
 
@@ -102,6 +121,8 @@ function showProfileSettingsModal(profile) {
     }
     profile.maxPanels = newMaxPanels;
     profile.interceptPdf = pdfCheckbox.checked;
+    const suspendVal = parseInt(suspendInput.value, 10);
+    profile.suspendTimeoutMinutes = isNaN(suspendVal) ? 30 : Math.max(0, Math.min(120, suspendVal));
     saveState();
     renderStatusBar();
     dismiss();
