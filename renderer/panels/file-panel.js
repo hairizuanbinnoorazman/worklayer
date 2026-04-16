@@ -13,6 +13,10 @@ const BINARY_EXTENSIONS = new Set([
   'sqlite', 'db',
 ]);
 
+const IMAGE_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg',
+]);
+
 const EXT_LANG_MAP = {
   js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
   ts: 'typescript', tsx: 'typescript',
@@ -360,6 +364,10 @@ function renderFilePanel(panel, container) {
     if (isBinaryFile(filePath)) {
       const ext = filePath.split('.').pop().toLowerCase();
       if (ext === 'pdf') {
+        addWebPanelAfter(panel.id, 'file://' + filePath);
+        return;
+      }
+      if (IMAGE_EXTENSIONS.has(ext)) {
         addWebPanelAfter(panel.id, 'file://' + filePath);
         return;
       }
