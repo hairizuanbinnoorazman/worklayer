@@ -7,9 +7,10 @@ const http = require('http');
 const crypto = require('crypto');
 
 const DEBUG_LOG = '/tmp/worklayer-debug.log';
+const logStream = fs.createWriteStream(DEBUG_LOG, { flags: 'a' });
 function debugLog(...args) {
   const msg = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
-  try { fs.appendFileSync(DEBUG_LOG, msg); } catch (_) {}
+  logStream.write(msg);
 }
 debugLog('=== main.js loaded ===');
 
@@ -887,6 +888,13 @@ app.whenReady().then(async () => {
   // Strip anti-framing headers so webview panels can load any site.
   // Only affects the 'persist:webpanels' session — main window is untouched.
   ses.webRequest.onHeadersReceived((details, callback) => {
+    // Anti-framing headers only matter for frame navigations — skip everything
+    // else so heavy pages with hundreds of sub-resources don't bottleneck here.
+    if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') {
+      callback({ cancel: false });
+      return;
+    }
+
     const headers = Object.assign({}, details.responseHeaders);
 
     for (const key of Object.keys(headers)) {
@@ -918,9 +926,11 @@ app.whenReady().then(async () => {
     contents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
       debugLog('[did-fail-load] code:', errorCode, 'desc:', errorDescription, 'url:', validatedURL);
     });
-    contents.on('console-message', (event, level, message, line, sourceId) => {
-      debugLog('[webcontents-console]', `level:${level}`, message);
-    });
+    if (process.env.WORKLAYER_DEBUG_CONSOLE === '1') {
+      contents.on('console-message', (event, level, message, line, sourceId) => {
+        debugLog('[webcontents-console]', `level:${level}`, message);
+      });
+    }
 
     // Intercept keystrokes in webview contents when search capture is active
     if (contents.getType() === 'webview') {

@@ -498,11 +498,6 @@ function renderWebPanel(panel, container) {
       hideBookmarkOverlay();
     }
     updateBookmarkBtn();
-    if (window.electronAPI.debugGetCookieCount) {
-      window.electronAPI.debugGetCookieCount().then(info => {
-        console.log(`[WebPanel] Cookies after navigate: total=${info.total} session=${info.session} persistent=${info.persistent}`);
-      }).catch(() => {});
-    }
   });
 
   webview.addEventListener('did-navigate-in-page', e => {
