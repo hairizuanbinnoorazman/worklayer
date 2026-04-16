@@ -3,18 +3,21 @@
 const DEFAULT_WEB_WIDTH = 750;
 const DEFAULT_TERM_WIDTH = 620;
 const DEFAULT_FILE_WIDTH = 900;
+const DEFAULT_DEBUG_WIDTH = 600;
 
 const MAX_TERMINAL_PANELS = 20;
 const MAX_WEB_PANELS = 20;
 const MAX_FILE_PANELS = 10;
+const MAX_DEBUG_PANELS = 5;
 
 function getProfileMaxPanels(profile) {
-  const defaults = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  const defaults = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS, debug: MAX_DEBUG_PANELS };
   if (!profile || !profile.maxPanels) return defaults;
   return {
     terminal: profile.maxPanels.terminal ?? defaults.terminal,
     web: profile.maxPanels.web ?? defaults.web,
     file: profile.maxPanels.file ?? defaults.file,
+    debug: profile.maxPanels.debug ?? defaults.debug,
   };
 }
 
@@ -146,7 +149,7 @@ async function init() {
         templates: [],
         urlHistory: [],
         bookmarks: [],
-        maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
+        maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS, debug: MAX_DEBUG_PANELS },
       }],
     };
   }
@@ -320,6 +323,10 @@ function killGroupTerminals(group) {
       const { cleanup } = activeWebPanels.get(p.id);
       if (cleanup) cleanup();
     }
+    if (p.type === 'debug' && activeDebugPanels.has(p.id)) {
+      const { cleanup } = activeDebugPanels.get(p.id);
+      if (cleanup) cleanup();
+    }
   });
 }
 
@@ -348,7 +355,7 @@ async function addPanel(type) {
     extraProps = { rootDir: result.path, openFile: null, openFiles: [] };
   }
 
-  const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH };
+  const widths = { terminal: DEFAULT_TERM_WIDTH, web: DEFAULT_WEB_WIDTH, file: DEFAULT_FILE_WIDTH, debug: DEFAULT_DEBUG_WIDTH };
   const panel = {
     id: generateId(),
     type,
@@ -495,6 +502,10 @@ function removePanel(panelId) {
   }
   if (activeWebPanels.has(panelId)) {
     const { cleanup } = activeWebPanels.get(panelId);
+    if (cleanup) cleanup();
+  }
+  if (activeDebugPanels.has(panelId)) {
+    const { cleanup } = activeDebugPanels.get(panelId);
     if (cleanup) cleanup();
   }
 
@@ -756,6 +767,7 @@ function teardownCurrentProfile() {
   activeTerminals.clear();
   activeEditors.clear();
   activeWebPanels.clear();
+  activeDebugPanels.clear();
   activeLspServers.clear();
 
   // Destroy all panel searches
@@ -784,7 +796,7 @@ function addProfile(name) {
     templates: [],
     urlHistory: [],
     bookmarks: [],
-    maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS },
+    maxPanels: { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS, debug: MAX_DEBUG_PANELS },
   };
 
   teardownCurrentProfile();

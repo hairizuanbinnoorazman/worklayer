@@ -22,6 +22,34 @@ export class CdpClient {
     return this._post('/open-panel', { url, termId, profileId, groupId });
   }
 
+  async getNetworkRequests(webContentsId) {
+    return this._post('/cdp/network-requests', { webContentsId });
+  }
+
+  async clearNetworkRequests(webContentsId) {
+    return this._post('/cdp/network-clear', { webContentsId });
+  }
+
+  async getConsoleMessages(webContentsId) {
+    return this._post('/cdp/console-messages', { webContentsId });
+  }
+
+  async clearConsoleMessages(webContentsId) {
+    return this._post('/cdp/console-clear', { webContentsId });
+  }
+
+  async addRoute(webContentsId, route) {
+    return this._post('/cdp/route-add', { webContentsId, route });
+  }
+
+  async removeRoute(webContentsId, pattern) {
+    return this._post('/cdp/route-remove', { webContentsId, pattern });
+  }
+
+  async listRoutes(webContentsId) {
+    return this._post('/cdp/route-list', { webContentsId });
+  }
+
   _get(path) {
     return new Promise((resolve, reject) => {
       const url = `http://127.0.0.1:${this.port}${path}?token=${this.token}`;

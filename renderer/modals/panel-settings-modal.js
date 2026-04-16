@@ -49,7 +49,7 @@ function showPanelSettingsModal(panel) {
   // Header
   const header = document.createElement('div');
   header.className = 'modal-header';
-  const typeNames = { terminal: 'Terminal', web: 'Web', file: 'File' };
+  const typeNames = { terminal: 'Terminal', web: 'Web', file: 'File', debug: 'Debug' };
   header.textContent = (typeNames[panel.type] || 'Panel') + ' Settings';
   container.appendChild(header);
 

@@ -76,9 +76,15 @@ function renderPanelStrip(scrollToEnd = true) {
     fileBtn.textContent = '+ Files';
     fileBtn.addEventListener('click', () => addPanel('file'));
 
+    const debugBtn = document.createElement('button');
+    debugBtn.className = 'add-panel-btn';
+    debugBtn.textContent = '+ Debug';
+    debugBtn.addEventListener('click', () => addPanel('debug'));
+
     actions.appendChild(webBtn);
     actions.appendChild(termBtn);
     actions.appendChild(fileBtn);
+    actions.appendChild(debugBtn);
     empty.appendChild(title);
     empty.appendChild(actions);
     wrapper.appendChild(empty);
@@ -106,9 +112,15 @@ function renderPanelStrip(scrollToEnd = true) {
     fileBtn.textContent = '+ Files';
     fileBtn.addEventListener('click', () => addPanel('file'));
 
+    const debugBtn2 = document.createElement('button');
+    debugBtn2.className = 'add-panel-btn';
+    debugBtn2.textContent = '+ Debug';
+    debugBtn2.addEventListener('click', () => addPanel('debug'));
+
     addControls.appendChild(webBtn);
     addControls.appendChild(termBtn);
     addControls.appendChild(fileBtn);
+    addControls.appendChild(debugBtn2);
     wrapper.appendChild(addControls);
   }
 
@@ -136,7 +148,7 @@ function createPanelElement(panel) {
 
   const typeLabel = document.createElement('span');
   typeLabel.className = 'panel-type-label';
-  typeLabel.textContent = panel.type === 'web' ? 'Web' : panel.type === 'file' ? 'Files' : 'Terminal';
+  typeLabel.textContent = panel.type === 'web' ? 'Web' : panel.type === 'file' ? 'Files' : panel.type === 'debug' ? 'Debug' : 'Terminal';
 
   const settingsBtn = document.createElement('button');
   settingsBtn.className = 'panel-settings-btn';
@@ -164,6 +176,8 @@ function createPanelElement(panel) {
     renderWebPanel(panel, content);
   } else if (panel.type === 'file') {
     renderFilePanel(panel, content);
+  } else if (panel.type === 'debug') {
+    renderDebugPanel(panel, content);
   } else {
     renderTermPanel(panel, content);
   }

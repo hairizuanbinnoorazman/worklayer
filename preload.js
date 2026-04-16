@@ -102,6 +102,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   panelCreateResponse: (requestId, panelId, error) =>
     ipcRenderer.send('panel:create-response', { requestId, panelId, error }),
 
+  // Debug panel
+  onDebugCdpEvent: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('debug:cdp-event', listener);
+    return () => ipcRenderer.removeListener('debug:cdp-event', listener);
+  },
+  debugGetNetworkRequests: (wcId) => ipcRenderer.invoke('debug:getNetworkRequests', { wcId }),
+  debugGetConsoleMessages: (wcId) => ipcRenderer.invoke('debug:getConsoleMessages', { wcId }),
+  debugClearNetwork: (wcId) => ipcRenderer.invoke('debug:clearNetwork', { wcId }),
+  debugClearConsole: (wcId) => ipcRenderer.invoke('debug:clearConsole', { wcId }),
+  debugListPanels: () => ipcRenderer.invoke('debug:listPanels'),
+
   // CDP webview registration
   cdpRegisterWebview: (webContentsId, panelId, url) =>
     ipcRenderer.send('cdp:register-webview', { webContentsId, panelId, url }),
