@@ -445,6 +445,178 @@ server.tool('set_network_conditions', 'Emulate network conditions', {
   });
 });
 
+// --- Debugging tools ---
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+server.tool('network_requests', 'List captured network requests for debugging (XHR, fetch, document loads, failures, etc.)', {
+  filter: z.string().optional().describe('Regex to filter URLs (e.g. "/api/" or "\\.json$")'),
+  static: z.boolean().optional().describe('Include successful static resources like images, fonts, CSS, JS (default: false)'),
+  requestHeaders: z.boolean().optional().describe('Include request headers in output'),
+  requestBody: z.boolean().optional().describe('Include request body/postData in output'),
+}, async ({ filter, static: includeStatic, requestHeaders: showReqHeaders, requestBody: showReqBody }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const resp = await cdp.getNetworkRequests(wcId);
+    let requests = resp.requests || [];
+
+    // Filter out successful static resources by default
+    const staticTypes = new Set(['Image', 'Font', 'Stylesheet', 'Script']);
+    if (!includeStatic) {
+      requests = requests.filter(r => {
+        if (staticTypes.has(r.resourceType) && r.status && r.status >= 200 && r.status < 400) return false;
+        return true;
+      });
+    }
+
+    // Apply URL regex filter
+    if (filter) {
+      const regex = new RegExp(filter);
+      requests = requests.filter(r => regex.test(r.url));
+    }
+
+    if (requests.length === 0) {
+      return { content: [{ type: 'text', text: 'No network requests captured.' }] };
+    }
+
+    const lines = requests.map(r => {
+      const parts = [];
+      if (r.failed) parts.push('FAILED');
+      else if (r.status) parts.push(String(r.status));
+      else parts.push('PENDING');
+      parts.push(`${r.method} ${r.url}`);
+      parts.push(`[${r.resourceType}]`);
+      if (r.encodedDataLength != null) parts.push(formatBytes(r.encodedDataLength));
+      if (r.failed && r.errorText) parts.push(`Error: ${r.errorText}${r.canceled ? ' (canceled)' : ''}`);
+
+      let line = parts.join('  ');
+      if (showReqHeaders && r.requestHeaders) {
+        line += '\n  Request Headers: ' + JSON.stringify(r.requestHeaders);
+      }
+      if (showReqBody && r.postData) {
+        const body = r.postData.length > 500 ? r.postData.slice(0, 500) + '...' : r.postData;
+        line += '\n  Request Body: ' + body;
+      }
+      return line;
+    });
+
+    return { content: [{ type: 'text', text: `${requests.length} request(s) captured:\n\n${lines.join('\n')}` }] };
+  });
+});
+
+server.tool('network_clear', 'Clear the captured network requests buffer', {}, async () => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    await cdp.clearNetworkRequests(wcId);
+    return { content: [{ type: 'text', text: 'Network request buffer cleared.' }] };
+  });
+});
+
+const consoleLevels = ['error', 'warning', 'info', 'debug'];
+
+server.tool('console_messages', 'Get console output from the page (log, warn, error, etc.)', {
+  level: z.enum(['error', 'warning', 'info', 'debug']).optional().describe('Minimum level to include (default: info). Each level includes more severe levels.'),
+  clear: z.boolean().optional().describe('Clear the buffer after reading'),
+}, async ({ level, clear }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const resp = await cdp.getConsoleMessages(wcId);
+    let messages = resp.messages || [];
+
+    // Map console API types to severity levels
+    const typeToLevel = {
+      error: 'error',
+      warning: 'warning', warn: 'warning',
+      info: 'info', log: 'info',
+      debug: 'debug', trace: 'debug', dir: 'debug', table: 'debug',
+    };
+
+    const minLevel = level || 'info';
+    const minIdx = consoleLevels.indexOf(minLevel);
+    messages = messages.filter(m => {
+      const msgLevel = typeToLevel[m.level] || 'info';
+      return consoleLevels.indexOf(msgLevel) <= minIdx;
+    });
+
+    if (clear) await cdp.clearConsoleMessages(wcId);
+
+    if (messages.length === 0) {
+      return { content: [{ type: 'text', text: 'No console messages captured.' }] };
+    }
+
+    const lines = messages.map(m => {
+      const levelTag = (typeToLevel[m.level] || m.level).toUpperCase();
+      let line = `[${levelTag}] ${m.text}`;
+      if (m.url) line += `  (${m.url}${m.lineNumber != null ? ':' + m.lineNumber : ''})`;
+      return line;
+    });
+
+    return { content: [{ type: 'text', text: `${messages.length} message(s):\n\n${lines.join('\n')}` }] };
+  });
+});
+
+server.tool('console_clear', 'Clear the captured console messages buffer', {}, async () => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    await cdp.clearConsoleMessages(wcId);
+    return { content: [{ type: 'text', text: 'Console message buffer cleared.' }] };
+  });
+});
+
+server.tool('evaluate', 'Evaluate a JavaScript expression on the page and return the result', {
+  expression: z.string().describe('JavaScript expression to evaluate (e.g. "document.title", "JSON.stringify(performance.timing)")'),
+}, async ({ expression }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const resp = await cdp.sendCommand(wcId, 'Runtime.evaluate', {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (resp.error) throw new Error(resp.error);
+    const { result, exceptionDetails } = resp.result;
+    if (exceptionDetails) {
+      const errMsg = exceptionDetails.exception?.description || exceptionDetails.text || 'Evaluation error';
+      return { content: [{ type: 'text', text: `Error: ${errMsg}` }] };
+    }
+    const value = result.value !== undefined ? JSON.stringify(result.value, null, 2) : result.description || result.type;
+    return { content: [{ type: 'text', text: value }] };
+  });
+});
+
+server.tool('route', 'Mock/intercept network requests matching a URL pattern', {
+  pattern: z.string().describe('URL pattern to match (e.g. "**/api/users", "**/*.json")'),
+  status: z.number().optional().describe('HTTP status code to return (default: 200)'),
+  body: z.string().optional().describe('Response body (text or JSON string)'),
+  contentType: z.string().optional().describe('Content-Type header (e.g. "application/json")'),
+  headers: z.array(z.string()).optional().describe('Headers to add in "Name: Value" format'),
+  removeHeaders: z.string().optional().describe('Comma-separated list of header names to remove from request'),
+}, async ({ pattern, status, body, contentType, headers, removeHeaders }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const route = { pattern, status: status || 200, body: body || '', contentType: contentType || null, headers: headers || [], removeHeaders: removeHeaders || null };
+    const resp = await cdp.addRoute(wcId, route);
+    if (resp.error) throw new Error(resp.error);
+    return { content: [{ type: 'text', text: `Route added: ${pattern} → ${route.status}${body ? ` (${body.length} bytes)` : ''}\n${resp.count} active route(s)` }] };
+  });
+});
+
+server.tool('unroute', 'Remove network routes (all routes if no pattern specified)', {
+  pattern: z.string().optional().describe('URL pattern to remove (omit to remove all routes)'),
+}, async ({ pattern }) => {
+  return withMutex(async () => {
+    const wcId = requirePanel();
+    const resp = await cdp.removeRoute(wcId, pattern || null);
+    if (resp.error) throw new Error(resp.error);
+    return { content: [{ type: 'text', text: pattern ? `Removed route: ${pattern}` : 'All routes removed.' }] };
+  });
+});
+
 // --- Start server ---
 
 const transport = new StdioServerTransport();

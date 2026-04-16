@@ -48,6 +48,13 @@ let termIdCounter = 0;
 const webviewPanelMap = new Map(); // webContentsId -> { panelId, url, title }
 const attachedDebuggers = new Map(); // webContentsId -> true
 
+// CDP debugging buffers
+const networkRequests = new Map();  // webContentsId -> Array<RequestEntry>
+const consoleMessages = new Map();  // webContentsId -> Array<ConsoleEntry>
+const networkRoutes = new Map();    // webContentsId -> Array<RouteEntry>
+const MAX_NETWORK_REQUESTS = 1000;
+const MAX_CONSOLE_MESSAGES = 500;
+
 // Browser intercept: local HTTP server + helper scripts
 let browserInterceptServer = null;
 let browserInterceptPort = 0;
@@ -60,6 +67,34 @@ function execFilePromise(command, args, options) {
       resolve({ error, stdout, stderr });
     });
   });
+}
+
+// Helper: find a network request entry by requestId (reverse search for performance)
+function findByRequestId(requests, requestId) {
+  for (let i = requests.length - 1; i >= 0; i--) {
+    if (requests[i].requestId === requestId) return requests[i];
+  }
+  return null;
+}
+
+// Helper: forward CDP debug events to the renderer for the debug panel
+function forwardDebugEvent(wcId, category, data) {
+  const wins = BrowserWindow.getAllWindows();
+  if (wins.length > 0 && !wins[0].webContents.isDestroyed()) {
+    wins[0].webContents.send('debug:cdp-event', { wcId, category, data });
+  }
+}
+
+// Helper: match URL against a glob-like pattern (supports ** and *)
+function matchUrlPattern(pattern, url) {
+  // Convert glob pattern to regex: ** matches anything, * matches non-/ characters
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  const regexStr = escaped.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*');
+  try {
+    return new RegExp(regexStr).test(url);
+  } catch {
+    return false;
+  }
 }
 
 function saveSessionCookies() {
@@ -536,6 +571,9 @@ ipcMain.on('cdp:register-webview', (_, { webContentsId, panelId, url, title }) =
 ipcMain.on('cdp:unregister-webview', (_, { webContentsId }) => {
   webviewPanelMap.delete(webContentsId);
   attachedDebuggers.delete(webContentsId);
+  networkRequests.delete(webContentsId);
+  consoleMessages.delete(webContentsId);
+  networkRoutes.delete(webContentsId);
   debugLog('[CDP] Unregistered webview wcId:', webContentsId);
 });
 
@@ -545,6 +583,29 @@ ipcMain.on('cdp:update-webview', (_, { webContentsId, url, title }) => {
     if (url !== undefined) info.url = url;
     if (title !== undefined) info.title = title;
   }
+});
+
+// Debug panel IPC: direct access to buffers (no HTTP roundtrip needed from renderer)
+ipcMain.handle('debug:getNetworkRequests', (_, { wcId }) => {
+  return networkRequests.get(wcId) || [];
+});
+ipcMain.handle('debug:getConsoleMessages', (_, { wcId }) => {
+  return consoleMessages.get(wcId) || [];
+});
+ipcMain.handle('debug:clearNetwork', (_, { wcId }) => {
+  if (networkRequests.has(wcId)) networkRequests.set(wcId, []);
+  return { ok: true };
+});
+ipcMain.handle('debug:clearConsole', (_, { wcId }) => {
+  if (consoleMessages.has(wcId)) consoleMessages.set(wcId, []);
+  return { ok: true };
+});
+ipcMain.handle('debug:listPanels', () => {
+  const panels = [];
+  for (const [wcId, info] of webviewPanelMap) {
+    panels.push({ webContentsId: wcId, panelId: info.panelId, url: info.url, title: info.title });
+  }
+  return panels;
 });
 
 function setupBrowserHelperScripts() {
@@ -711,6 +772,155 @@ function startBrowserInterceptServer() {
               await wc.debugger.sendCommand('Accessibility.enable');
               await wc.debugger.sendCommand('Network.enable');
               await wc.debugger.sendCommand('Runtime.enable');
+
+              // Initialize debugging buffers
+              if (!networkRequests.has(wcId)) networkRequests.set(wcId, []);
+              if (!consoleMessages.has(wcId)) consoleMessages.set(wcId, []);
+
+              // Enable Fetch domain if routes are already configured
+              const existingRoutes = networkRoutes.get(wcId);
+              if (existingRoutes && existingRoutes.length > 0) {
+                const patterns = existingRoutes.map(r => ({ urlPattern: r.pattern }));
+                await wc.debugger.sendCommand('Fetch.enable', { patterns });
+              }
+
+              // Listen for CDP events (Network, Runtime, Fetch)
+              wc.debugger.on('message', (event, method, params) => {
+                // --- Network request tracking ---
+                if (method === 'Network.requestWillBeSent') {
+                  const requests = networkRequests.get(wcId);
+                  if (requests) {
+                    if (requests.length >= MAX_NETWORK_REQUESTS) requests.shift();
+                    requests.push({
+                      requestId: params.requestId,
+                      url: params.request.url,
+                      method: params.request.method,
+                      resourceType: params.type || 'Other',
+                      requestHeaders: params.request.headers || null,
+                      postData: params.request.postData || null,
+                      status: null,
+                      statusText: null,
+                      responseHeaders: null,
+                      encodedDataLength: null,
+                      timestamp: params.timestamp,
+                      failed: false,
+                      errorText: null,
+                      canceled: false,
+                      finished: false,
+                    });
+                    forwardDebugEvent(wcId, 'network', { type: 'request', requestId: params.requestId, url: params.request.url, method: params.request.method, resourceType: params.type || 'Other' });
+                  }
+                }
+                else if (method === 'Network.responseReceived') {
+                  const requests = networkRequests.get(wcId);
+                  if (requests) {
+                    const entry = findByRequestId(requests, params.requestId);
+                    if (entry) {
+                      entry.status = params.response.status;
+                      entry.statusText = params.response.statusText;
+                      entry.responseHeaders = params.response.headers || null;
+                      forwardDebugEvent(wcId, 'network', { type: 'response', requestId: params.requestId, status: params.response.status, statusText: params.response.statusText });
+                    }
+                  }
+                }
+                else if (method === 'Network.loadingFinished') {
+                  const requests = networkRequests.get(wcId);
+                  if (requests) {
+                    const entry = findByRequestId(requests, params.requestId);
+                    if (entry) {
+                      entry.finished = true;
+                      entry.encodedDataLength = params.encodedDataLength || 0;
+                    }
+                  }
+                }
+                else if (method === 'Network.loadingFailed') {
+                  const requests = networkRequests.get(wcId);
+                  if (requests) {
+                    const entry = findByRequestId(requests, params.requestId);
+                    if (entry) {
+                      entry.failed = true;
+                      entry.errorText = params.errorText || 'Unknown error';
+                      entry.canceled = !!params.canceled;
+                      entry.finished = true;
+                      forwardDebugEvent(wcId, 'network', { type: 'failed', requestId: params.requestId, errorText: entry.errorText });
+                    }
+                  }
+                }
+
+                // --- Console message tracking ---
+                else if (method === 'Runtime.consoleAPICalled') {
+                  const messages = consoleMessages.get(wcId);
+                  if (messages) {
+                    if (messages.length >= MAX_CONSOLE_MESSAGES) messages.shift();
+                    const text = (params.args || []).map(a => {
+                      if (a.type === 'string') return a.value;
+                      if (a.value !== undefined) return String(a.value);
+                      if (a.description) return a.description;
+                      return a.type;
+                    }).join(' ');
+                    const entry = {
+                      level: params.type || 'log',
+                      text,
+                      timestamp: params.timestamp,
+                      url: params.stackTrace?.callFrames?.[0]?.url || null,
+                      lineNumber: params.stackTrace?.callFrames?.[0]?.lineNumber || null,
+                    };
+                    messages.push(entry);
+                    forwardDebugEvent(wcId, 'console', entry);
+                  }
+                }
+                else if (method === 'Runtime.exceptionThrown') {
+                  const messages = consoleMessages.get(wcId);
+                  if (messages) {
+                    if (messages.length >= MAX_CONSOLE_MESSAGES) messages.shift();
+                    const ex = params.exceptionDetails;
+                    const text = ex?.exception?.description || ex?.text || 'Unknown exception';
+                    const entry = {
+                      level: 'error',
+                      text,
+                      timestamp: params.timestamp,
+                      url: ex?.url || null,
+                      lineNumber: ex?.lineNumber || null,
+                    };
+                    messages.push(entry);
+                    forwardDebugEvent(wcId, 'console', entry);
+                  }
+                }
+
+                // --- Fetch interception for routing ---
+                else if (method === 'Fetch.requestPaused') {
+                  const routes = networkRoutes.get(wcId);
+                  if (routes && routes.length > 0) {
+                    const matchedRoute = routes.find(r => matchUrlPattern(r.pattern, params.request.url));
+                    if (matchedRoute) {
+                      const responseHeaders = [];
+                      if (matchedRoute.contentType) {
+                        responseHeaders.push({ name: 'Content-Type', value: matchedRoute.contentType });
+                      }
+                      if (matchedRoute.headers) {
+                        for (const h of matchedRoute.headers) {
+                          const idx = h.indexOf(':');
+                          if (idx > 0) responseHeaders.push({ name: h.slice(0, idx).trim(), value: h.slice(idx + 1).trim() });
+                        }
+                      }
+                      const body = matchedRoute.body ? Buffer.from(matchedRoute.body).toString('base64') : '';
+                      wc.debugger.sendCommand('Fetch.fulfillRequest', {
+                        requestId: params.requestId,
+                        responseCode: matchedRoute.status || 200,
+                        responseHeaders,
+                        body,
+                      }).catch(e => debugLog('[CDP] Fetch.fulfillRequest error:', e.message));
+                    } else {
+                      wc.debugger.sendCommand('Fetch.continueRequest', { requestId: params.requestId })
+                        .catch(e => debugLog('[CDP] Fetch.continueRequest error:', e.message));
+                    }
+                  } else {
+                    wc.debugger.sendCommand('Fetch.continueRequest', { requestId: params.requestId })
+                      .catch(e => debugLog('[CDP] Fetch.continueRequest error:', e.message));
+                  }
+                }
+              });
+
               debugLog('[CDP] Attached debugger to wcId:', wcId);
             } catch (e) {
               debugLog('[CDP] Attach error:', e.message);
@@ -740,9 +950,118 @@ function startBrowserInterceptServer() {
           if (wc && !wc.isDestroyed() && attachedDebuggers.has(wcId)) {
             try { wc.debugger.detach(); } catch (e) {}
             attachedDebuggers.delete(wcId);
+            networkRequests.delete(wcId);
+            consoleMessages.delete(wcId);
+            networkRoutes.delete(wcId);
           }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // --- /cdp/network-requests: get captured network requests ---
+        if (parsedUrl.pathname === '/cdp/network-requests' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          const requests = networkRequests.get(wcId) || [];
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ requests }));
+          return;
+        }
+
+        // --- /cdp/network-clear: clear captured network requests ---
+        if (parsedUrl.pathname === '/cdp/network-clear' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          if (networkRequests.has(wcId)) networkRequests.set(wcId, []);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // --- /cdp/console-messages: get captured console messages ---
+        if (parsedUrl.pathname === '/cdp/console-messages' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          const messages = consoleMessages.get(wcId) || [];
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ messages }));
+          return;
+        }
+
+        // --- /cdp/console-clear: clear captured console messages ---
+        if (parsedUrl.pathname === '/cdp/console-clear' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          if (consoleMessages.has(wcId)) consoleMessages.set(wcId, []);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // --- /cdp/route-add: add a network route for interception ---
+        if (parsedUrl.pathname === '/cdp/route-add' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId, route } = body;
+          if (!networkRoutes.has(wcId)) networkRoutes.set(wcId, []);
+          const routes = networkRoutes.get(wcId);
+          // Remove existing route with same pattern
+          const existing = routes.findIndex(r => r.pattern === route.pattern);
+          if (existing >= 0) routes.splice(existing, 1);
+          routes.push(route);
+          // Enable Fetch domain with all active patterns
+          const wc = webContents.fromId(wcId);
+          if (wc && !wc.isDestroyed() && attachedDebuggers.has(wcId)) {
+            try {
+              const patterns = routes.map(r => ({ urlPattern: r.pattern }));
+              await wc.debugger.sendCommand('Fetch.enable', { patterns });
+            } catch (e) {
+              debugLog('[CDP] Fetch.enable error:', e.message);
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, count: routes.length }));
+          return;
+        }
+
+        // --- /cdp/route-remove: remove a network route ---
+        if (parsedUrl.pathname === '/cdp/route-remove' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId, pattern } = body;
+          const routes = networkRoutes.get(wcId);
+          if (routes) {
+            if (pattern) {
+              const idx = routes.findIndex(r => r.pattern === pattern);
+              if (idx >= 0) routes.splice(idx, 1);
+            } else {
+              routes.length = 0; // Remove all
+            }
+            const wc = webContents.fromId(wcId);
+            if (wc && !wc.isDestroyed() && attachedDebuggers.has(wcId)) {
+              try {
+                if (routes.length > 0) {
+                  const patterns = routes.map(r => ({ urlPattern: r.pattern }));
+                  await wc.debugger.sendCommand('Fetch.enable', { patterns });
+                } else {
+                  await wc.debugger.sendCommand('Fetch.disable');
+                }
+              } catch (e) {
+                debugLog('[CDP] Fetch toggle error:', e.message);
+              }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, count: routes ? routes.length : 0 }));
+          return;
+        }
+
+        // --- /cdp/route-list: list active routes ---
+        if (parsedUrl.pathname === '/cdp/route-list' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const { webContentsId: wcId } = body;
+          const routes = networkRoutes.get(wcId) || [];
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ routes }));
           return;
         }
 
@@ -1095,6 +1414,9 @@ app.whenReady().then(async () => {
       contents.once('destroyed', () => {
         attachedDebuggers.delete(contents.id);
         webviewPanelMap.delete(contents.id);
+        networkRequests.delete(contents.id);
+        consoleMessages.delete(contents.id);
+        networkRoutes.delete(contents.id);
       });
     }
   });

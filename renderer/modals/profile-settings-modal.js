@@ -22,6 +22,7 @@ function showProfileSettingsModal(profile) {
     { key: 'terminal', label: 'Max Terminal Panels' },
     { key: 'web', label: 'Max Web Panels' },
     { key: 'file', label: 'Max File Panels' },
+    { key: 'debug', label: 'Max Debug Panels' },
   ];
 
   const inputs = {};
