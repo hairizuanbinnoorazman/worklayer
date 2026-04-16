@@ -25,6 +25,14 @@ function renderStatusBar() {
         `${label} ${activeCount} active \u00b7 ${count} / ${max}` +
         `</span>`;
     }
+    if (type === 'web') {
+      const suspCount = typeof suspendedPanels !== 'undefined' ? suspendedPanels.size : 0;
+      const suffix = suspCount > 0 ? ` \u00b7 ${suspCount} suspended` : '';
+      return `<span class="status-bar-item">` +
+        `<span class="status-bar-dot ${type}"></span>` +
+        `${label} ${count} / ${max}${suffix}` +
+        `</span>`;
+    }
     return `<span class="status-bar-item">` +
       `<span class="status-bar-dot ${type}"></span>` +
       `${label} ${count} / ${max}` +

@@ -367,6 +367,24 @@ function renderWebPanel(panel, container) {
   const navigate = (raw) => {
     let url = raw.trim();
     if (!url) return;
+    // Auto-resume if panel is suspended and user initiates navigation
+    if (isSuspended(panel.id)) {
+      const overlay = webviewWrapper.querySelector('.suspend-overlay');
+      if (overlay) overlay.remove();
+      const panelEl = webview.closest('.panel');
+      if (panelEl) {
+        const lbl = panelEl.querySelector('.panel-type-label');
+        if (lbl) lbl.classList.remove('panel-label-suspended');
+        const suspBtn = panelEl.querySelector('.panel-suspend-btn');
+        if (suspBtn) {
+          suspBtn.textContent = '\u23F8';
+          suspBtn.title = 'Suspend panel';
+          suspBtn.classList.remove('suspended');
+        }
+      }
+      suspendedPanels.delete(panel.id);
+      startSuspendTimer(panel.id);
+    }
     hideBookmarkOverlay();
     if (navigateInFlight) {
       console.log(`[WebPanel] navigate blocked — already in flight panel=${panel.id}`);
@@ -479,6 +497,8 @@ function renderWebPanel(panel, container) {
   webview.addEventListener('did-navigate', e => {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     navigateInFlight = false;
+    // Skip state updates when navigating to about:blank due to suspension
+    if (isSuspended(panel.id)) return;
     errorPageShownForUrl = null;
     removeErrorOverlay();
     if (!e.url.startsWith('data:')) {
@@ -506,6 +526,7 @@ function renderWebPanel(panel, container) {
   });
 
   webview.addEventListener('did-navigate-in-page', e => {
+    if (isSuspended(panel.id)) return;
     if (e.isMainFrame && !e.url.startsWith('data:')) {
       lastRealUrl = e.url;
       urlInput.value = e.url;
@@ -568,6 +589,7 @@ function renderWebPanel(panel, container) {
   // BUT keep capture alive if the search bar is currently visible/active
   webview.addEventListener('focus', () => {
     setFocusedPanel(panel.id);
+    resetSuspendTimer(panel.id);
     const entry = activePanelSearches.get(panel.id);
     if (entry && !entry.bar.hidden) {
       console.log('[WebPanel] focus event — search bar active, refocusing search input');
@@ -588,6 +610,7 @@ function renderWebPanel(panel, container) {
   });
 
   webview.addEventListener('page-title-updated', e => {
+    if (isSuspended(panel.id)) return;
     if (webview.getURL().startsWith('data:')) return;
     // Update CDP tracking with new title
     if (window.electronAPI.cdpUpdateWebview && webview._webContentsId) {
@@ -613,8 +636,87 @@ function renderWebPanel(panel, container) {
     }
   });
 
+  // ── Suspend / Resume ─────────────────────────────
+  const suspend = () => {
+    if (isSuspended(panel.id)) return;
+    const url = lastRealUrl || panel.url || '';
+    const panelEl = webview.closest('.panel');
+    const title = panelEl ? (panelEl.querySelector('.panel-type-label')?.textContent || 'Web') : 'Web';
+    suspendedPanels.set(panel.id, { url, title });
+
+    // Create suspend overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'suspend-overlay';
+    const icon = document.createElement('div');
+    icon.className = 'suspend-overlay-icon';
+    icon.textContent = '\u23F8';
+    const text = document.createElement('div');
+    text.className = 'suspend-overlay-text';
+    text.textContent = 'Panel suspended to save resources';
+    const urlLabel = document.createElement('div');
+    urlLabel.className = 'suspend-overlay-url';
+    urlLabel.textContent = url;
+    const resumeBtn = document.createElement('button');
+    resumeBtn.className = 'suspend-overlay-resume';
+    resumeBtn.textContent = 'Click to resume';
+    resumeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resumePanel(panel.id);
+    });
+    overlay.appendChild(icon);
+    overlay.appendChild(text);
+    overlay.appendChild(urlLabel);
+    overlay.appendChild(resumeBtn);
+    overlay.addEventListener('click', () => resumePanel(panel.id));
+    webviewWrapper.appendChild(overlay);
+
+    // Dim the panel header label
+    if (panelEl) {
+      const lbl = panelEl.querySelector('.panel-type-label');
+      if (lbl) lbl.classList.add('panel-label-suspended');
+      const suspBtn = panelEl.querySelector('.panel-suspend-btn');
+      if (suspBtn) {
+        suspBtn.textContent = '\u25B6';
+        suspBtn.title = 'Resume panel';
+        suspBtn.classList.add('suspended');
+      }
+    }
+
+    webview.loadURL('about:blank').catch(() => {});
+    console.log(`[WebPanel] Suspended panel=${panel.id} url=${url}`);
+  };
+
+  const resume = (url) => {
+    // Remove suspend overlay
+    const overlay = webviewWrapper.querySelector('.suspend-overlay');
+    if (overlay) overlay.remove();
+
+    // Restore panel header label
+    const panelEl = webview.closest('.panel');
+    if (panelEl) {
+      const lbl = panelEl.querySelector('.panel-type-label');
+      if (lbl) lbl.classList.remove('panel-label-suspended');
+      const suspBtn = panelEl.querySelector('.panel-suspend-btn');
+      if (suspBtn) {
+        suspBtn.textContent = '\u23F8';
+        suspBtn.title = 'Suspend panel';
+        suspBtn.classList.remove('suspended');
+      }
+    }
+
+    if (url) {
+      navigate(url);
+    }
+    console.log(`[WebPanel] Resumed panel=${panel.id} url=${url}`);
+  };
+
+  // Start inactivity timer
+  startSuspendTimer(panel.id);
+
   // Cleanup function — mirrors the pattern used by mountTerminal() in term-panel.js
   const cleanup = () => {
+    clearSuspendTimer(panel.id);
+    suspendedPanels.delete(panel.id);
     const wcId = webview._webContentsId;
     if (wcId !== undefined) {
       webviewRegistry.delete(wcId);
@@ -625,5 +727,5 @@ function renderWebPanel(panel, container) {
     destroyPanelSearch(panel.id);
     activeWebPanels.delete(panel.id);
   };
-  activeWebPanels.set(panel.id, { cleanup });
+  activeWebPanels.set(panel.id, { cleanup, suspend, resume });
 }
