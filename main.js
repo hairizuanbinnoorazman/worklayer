@@ -61,6 +61,14 @@ let browserInterceptPort = 0;
 const browserInterceptToken = crypto.randomBytes(16).toString('hex');
 let browserHelperDir = null;
 
+// TLS certificate error handling for web panels.
+// Per-panel host exemptions: webContentsId -> Set<host>. Cleared when the
+// webContents is destroyed (e.g. panel closed) or on app restart.
+const tlsExemptions = new Map();
+// Profile-level kill-switch: when true, all cert errors on webview contents
+// using the persist:webpanels session are silently allowed.
+let ignoreAllTlsErrors = false;
+
 function execFilePromise(command, args, options) {
   return new Promise((resolve) => {
     execFile(command, args, options, (error, stdout, stderr) => {
@@ -606,6 +614,32 @@ ipcMain.handle('debug:listPanels', () => {
     panels.push({ webContentsId: wcId, panelId: info.panelId, url: info.url, title: info.title });
   }
   return panels;
+});
+
+// TLS: add a per-panel host exemption, then reload so the now-allowed cert
+// passes the certificate-error handler above.
+ipcMain.handle('tls:allow-host', (_, { webContentsId, host }) => {
+  if (!webContentsId || !host) return { ok: false };
+  let set = tlsExemptions.get(webContentsId);
+  if (!set) {
+    set = new Set();
+    tlsExemptions.set(webContentsId, set);
+  }
+  set.add(host);
+  debugLog('[TLS] allowed host for wcId:', webContentsId, 'host:', host);
+  const wc = webContents.fromId(webContentsId);
+  if (wc && !wc.isDestroyed()) {
+    wc.reload();
+  }
+  return { ok: true };
+});
+
+// TLS: toggle the profile-level kill-switch. When true, every cert error on
+// persist:webpanels webviews is silently allowed.
+ipcMain.handle('tls:set-ignore-all', (_, { enabled }) => {
+  ignoreAllTlsErrors = !!enabled;
+  debugLog('[TLS] ignoreAllTlsErrors =', ignoreAllTlsErrors);
+  return { ok: true };
 });
 
 function setupBrowserHelperScripts() {
@@ -1236,11 +1270,71 @@ app.whenReady().then(async () => {
   });
   debugLog('[WebPanels] Registered onHeadersReceived to strip anti-framing headers');
 
+  // TLS certificate errors: only handle webview contents on persist:webpanels.
+  // Default: block (callback(false)) so did-fail-load surfaces in the renderer
+  // and the warning page is shown. Allow when the profile-level toggle is on
+  // or the user has explicitly exempted this host for this panel.
+  app.on('certificate-error', (event, wc, url, error, certificate, callback) => {
+    if (!wc || wc.isDestroyed() || wc.getType() !== 'webview') {
+      return callback(false);
+    }
+    let partition = null;
+    try { partition = wc.session && wc.session.getStoragePath ? wc.session.storagePath : null; } catch (e) {}
+    // Robust check: only apply to our webpanel session.
+    const isWebPanel = wc.session === session.fromPartition('persist:webpanels');
+    if (!isWebPanel) return callback(false);
+
+    let host = '';
+    try { host = new URL(url).host; } catch (e) {}
+
+    if (ignoreAllTlsErrors) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+
+    const allowed = tlsExemptions.get(wc.id);
+    if (allowed && host && allowed.has(host)) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+
+    debugLog('[TLS] cert-error wcId:', wc.id, 'host:', host, 'error:', error, 'url:', url);
+
+    // Send cert details to the renderer so the warning page can display
+    // issuer/validity. Use the host webContents (main window).
+    const host_wc = wc.hostWebContents;
+    if (host_wc && !host_wc.isDestroyed()) {
+      host_wc.send('tls:error-details', {
+        webContentsId: wc.id,
+        url,
+        host,
+        error,
+        certificate: certificate ? {
+          subjectName: certificate.subjectName || (certificate.subject && certificate.subject.commonName) || '',
+          issuerName: certificate.issuerName || (certificate.issuer && certificate.issuer.commonName) || '',
+          validStart: certificate.validStart || 0,
+          validExpiry: certificate.validExpiry || 0,
+          fingerprint: certificate.fingerprint || '',
+          serialNumber: certificate.serialNumber || '',
+        } : null,
+      });
+    }
+
+    callback(false);
+  });
+
   // Log webview render process crashes
   app.on('web-contents-created', (_, contents) => {
     debugLog('[web-contents-created] type:', contents.getType());
     contents.on('render-process-gone', (event, details) => {
       debugLog('[render-process-gone] reason:', details.reason, 'exitCode:', details.exitCode);
+    });
+    contents.once('destroyed', () => {
+      if (tlsExemptions.delete(contents.id)) {
+        debugLog('[TLS] cleared exemptions for destroyed wcId:', contents.id);
+      }
     });
     contents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
       debugLog('[did-fail-load] code:', errorCode, 'desc:', errorDescription, 'url:', validatedURL);

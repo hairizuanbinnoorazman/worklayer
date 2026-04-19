@@ -3,6 +3,45 @@
 // Registry: webContentsId -> { panelId, refresh(), showSearch() }
 const webviewRegistry = new Map();
 
+// Latest TLS cert error details pushed from main, keyed by webContentsId.
+// The certificate-error event fires before did-fail-load, so the warning page
+// renderer can look up details here. One entry per wc — replaced on each error.
+const tlsErrorDetails = new Map();
+if (window.electronAPI && window.electronAPI.onTlsErrorDetails) {
+  window.electronAPI.onTlsErrorDetails((data) => {
+    if (data && data.webContentsId) {
+      tlsErrorDetails.set(data.webContentsId, data);
+    }
+  });
+}
+
+// Chromium net error codes for certificate failures (handled in warning page).
+// See net/base/net_error_list.h — codes land in did-fail-load's errorCode.
+function isCertErrorCode(code) {
+  return code <= -200 && code >= -299;
+}
+function describeCertError(code, description) {
+  const map = {
+    [-200]: 'Certificate is invalid',
+    [-201]: 'Certificate authority is not trusted',
+    [-202]: 'Certificate does not match the hostname',
+    [-203]: 'Certificate has expired or is not yet valid',
+    [-204]: 'Certificate contains errors',
+    [-205]: 'No revocation mechanism available',
+    [-206]: 'Unable to check certificate revocation',
+    [-207]: 'Certificate revoked',
+    [-208]: 'Invalid certificate',
+    [-209]: 'Certificate is weakly signed',
+    [-210]: 'Certificate uses a non-unique name',
+    [-211]: 'Certificate chain uses a weak key',
+    [-212]: 'Name-constraint violation in certificate',
+    [-213]: 'Certificate validity period is too long',
+    [-215]: 'Certificate Transparency requirements not met',
+    [-216]: 'Certificate known to be compromised',
+  };
+  return map[code] || description || 'Certificate error';
+}
+
 // IPC listeners for Cmd+R and Cmd+F from main process before-input-event
 if (window.electronAPI.onWebviewRefresh) {
   window.electronAPI.onWebviewRefresh(({ webContentsId }) => {
@@ -339,6 +378,84 @@ function renderWebPanel(panel, container) {
   function removeErrorOverlay() {
     const overlay = webviewWrapper.querySelector('.webview-error-overlay');
     if (overlay) overlay.remove();
+    const tlsOverlay = webviewWrapper.querySelector('.webview-tls-overlay');
+    if (tlsOverlay) tlsOverlay.remove();
+  }
+
+  // TLS warning page. Rendered as a DOM overlay (not a data: URL) so the
+  // "Continue anyway" button can call IPC from the main renderer context.
+  function showTlsWarningPage(url, errorDescription, errorCode) {
+    loadingBar.classList.remove('active');
+    errorPageShownForUrl = url;
+
+    let host = '';
+    try { host = new URL(url).host; } catch (e) {}
+    const wcId = webview._webContentsId;
+    const details = wcId ? tlsErrorDetails.get(wcId) : null;
+    const cert = details && details.certificate ? details.certificate : null;
+    const errorTitle = describeCertError(errorCode, errorDescription);
+
+    const fmtDate = (ts) => {
+      if (!ts) return '—';
+      try { return new Date(ts * 1000).toUTCString(); } catch (e) { return String(ts); }
+    };
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+
+    let overlay = webviewWrapper.querySelector('.webview-tls-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.className = 'webview-tls-overlay';
+    overlay.style.cssText = 'position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:#1e1e2e;color:#cdd6f4;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;overflow:auto;';
+
+    const certRows = cert ? `
+      <div style="margin-top:1rem;border-top:1px solid #45475a;padding-top:1rem;font-size:0.9rem;color:#a6adc8;text-align:left;">
+        <div><span style="color:#bac2de;">Subject:</span> ${esc(cert.subjectName) || '—'}</div>
+        <div><span style="color:#bac2de;">Issuer:</span> ${esc(cert.issuerName) || '—'}</div>
+        <div><span style="color:#bac2de;">Valid from:</span> ${esc(fmtDate(cert.validStart))}</div>
+        <div><span style="color:#bac2de;">Valid until:</span> ${esc(fmtDate(cert.validExpiry))}</div>
+        ${cert.fingerprint ? `<div style="word-break:break-all;"><span style="color:#bac2de;">Fingerprint:</span> ${esc(cert.fingerprint)}</div>` : ''}
+      </div>` : '<div style="margin-top:0.75rem;color:#6c7086;font-size:0.85rem;">Certificate details unavailable.</div>';
+
+    overlay.innerHTML = `
+      <div style="max-width:560px;padding:2rem;text-align:center;">
+        <div style="font-size:3rem;margin-bottom:0.5rem;">\u26a0</div>
+        <h2 style="margin:0 0 0.25rem;color:#f38ba8;">Your connection is not private</h2>
+        <p style="color:#a6adc8;margin:0 0 0.5rem;word-break:break-all;">${esc(url)}</p>
+        <p style="color:#f9e2af;margin:0.5rem 0 0;"><strong>${esc(errorTitle)}</strong></p>
+        <p style="color:#6c7086;font-size:0.85rem;margin:0.25rem 0 0;">${esc(errorDescription || '')} (${errorCode})</p>
+        ${certRows}
+        <div style="margin-top:1.5rem;display:flex;gap:0.75rem;justify-content:center;">
+          <button class="tls-back-btn" style="padding:0.5rem 1.25rem;border:1px solid #45475a;border-radius:6px;background:transparent;color:#cdd6f4;font-size:0.95rem;cursor:pointer;">Go back</button>
+          <button class="tls-continue-btn" style="padding:0.5rem 1.25rem;border:none;border-radius:6px;background:#f38ba8;color:#1e1e2e;font-size:0.95rem;font-weight:600;cursor:pointer;">Continue anyway</button>
+        </div>
+        <p style="color:#6c7086;font-size:0.8rem;margin-top:1rem;">Exemption applies to this panel only until it is closed.</p>
+      </div>`;
+
+    webviewWrapper.appendChild(overlay);
+
+    overlay.querySelector('.tls-back-btn').addEventListener('click', () => {
+      overlay.remove();
+      if (webview.canGoBack()) {
+        webview.goBack();
+      } else {
+        webview.src = 'about:blank';
+      }
+    });
+    overlay.querySelector('.tls-continue-btn').addEventListener('click', async () => {
+      if (!wcId || !host) {
+        overlay.remove();
+        return;
+      }
+      try {
+        await window.electronAPI.tlsAllowHost(wcId, host);
+      } catch (e) {
+        console.log(`[WebPanel] tlsAllowHost failed panel=${panel.id} host=${host} err=${e.message}`);
+      }
+      overlay.remove();
+      errorPageShownForUrl = null;
+    });
   }
 
   function showErrorPage(url, errorDescription, errorCode) {
@@ -481,6 +598,8 @@ function renderWebPanel(panel, container) {
     navigateInFlight = false;
     errorPageShownForUrl = null;
     removeErrorOverlay();
+    const tlsOverlay = webviewWrapper.querySelector('.webview-tls-overlay');
+    if (tlsOverlay) tlsOverlay.remove();
     if (!e.url.startsWith('data:')) {
       lastRealUrl = e.url;
       crashRetryCount = 0;
@@ -513,7 +632,12 @@ function renderWebPanel(panel, container) {
   webview.addEventListener('did-fail-load', e => {
     console.log(`[WebPanel] did-fail-load panel=${panel.id} error=${e.errorDescription} code=${e.errorCode} url=${e.validatedURL}`);
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
-    showErrorPage(e.validatedURL || lastRealUrl || '', e.errorDescription, e.errorCode);
+    const failUrl = e.validatedURL || lastRealUrl || '';
+    if (isCertErrorCode(e.errorCode)) {
+      showTlsWarningPage(failUrl, e.errorDescription, e.errorCode);
+      return;
+    }
+    showErrorPage(failUrl, e.errorDescription, e.errorCode);
   });
 
   // Handle errors dispatched from navigateWebPanel in app.js
