@@ -70,6 +70,29 @@ function showProfileSettingsModal(profile) {
   pdfField.appendChild(pdfLabel);
   container.appendChild(pdfField);
 
+  // ── Ignore TLS errors toggle ──
+  const tlsField = document.createElement('div');
+  tlsField.className = 'modal-field';
+  tlsField.style.flexDirection = 'row';
+  tlsField.style.alignItems = 'center';
+  tlsField.style.gap = '8px';
+
+  const tlsCheckbox = document.createElement('input');
+  tlsCheckbox.type = 'checkbox';
+  tlsCheckbox.id = 'ignore-tls-checkbox';
+  tlsCheckbox.checked = getProfileIgnoreTlsErrors(profile);
+
+  const tlsLabel = document.createElement('label');
+  tlsLabel.className = 'modal-label';
+  tlsLabel.setAttribute('for', 'ignore-tls-checkbox');
+  tlsLabel.textContent = 'Ignore all TLS certificate errors';
+  tlsLabel.title = 'Insecure — allows any invalid certificate on web panels';
+  tlsLabel.style.marginBottom = '0';
+
+  tlsField.appendChild(tlsCheckbox);
+  tlsField.appendChild(tlsLabel);
+  container.appendChild(tlsField);
+
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
 
@@ -103,8 +126,12 @@ function showProfileSettingsModal(profile) {
     }
     profile.maxPanels = newMaxPanels;
     profile.interceptPdf = pdfCheckbox.checked;
+    profile.ignoreTlsErrors = tlsCheckbox.checked;
     saveState();
     renderStatusBar();
+    if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
+      window.electronAPI.tlsSetIgnoreAll(!!profile.ignoreTlsErrors);
+    }
     dismiss();
   }
 

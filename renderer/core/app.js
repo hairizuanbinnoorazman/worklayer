@@ -26,6 +26,17 @@ function getProfileInterceptPdf(profile) {
   return !!profile.interceptPdf;
 }
 
+function getProfileIgnoreTlsErrors(profile) {
+  if (!profile || profile.ignoreTlsErrors === undefined) return false;
+  return !!profile.ignoreTlsErrors;
+}
+
+function syncTlsIgnoreToMain() {
+  if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
+    window.electronAPI.tlsSetIgnoreAll(getProfileIgnoreTlsErrors(getActiveProfile()));
+  }
+}
+
 const MAX_URL_HISTORY = 100;
 const MAX_URL_COUNT = 10;
 const URL_DECAY_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
@@ -157,6 +168,7 @@ async function init() {
   renderSidebar();
   document.getElementById('sidebar').style.width = state.sidebarWidth + 'px';
   renderPanelStrip();
+  syncTlsIgnoreToMain();
 
   let windowResizeTimer = null;
   window.addEventListener('resize', () => {
@@ -805,6 +817,7 @@ function addProfile(name) {
   saveState();
   renderSidebar();
   renderPanelStrip();
+  syncTlsIgnoreToMain();
 }
 
 function switchProfile(profileId) {
@@ -816,6 +829,7 @@ function switchProfile(profileId) {
   saveState();
   renderSidebar();
   renderPanelStrip();
+  syncTlsIgnoreToMain();
 }
 
 function renameProfile(profileId, newName) {

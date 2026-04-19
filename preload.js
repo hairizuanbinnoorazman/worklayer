@@ -128,4 +128,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+
+  // TLS certificate error handling for web panels
+  tlsAllowHost: (webContentsId, host) =>
+    ipcRenderer.invoke('tls:allow-host', { webContentsId, host }),
+  tlsSetIgnoreAll: (enabled) =>
+    ipcRenderer.invoke('tls:set-ignore-all', { enabled }),
+  onTlsErrorDetails: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('tls:error-details', listener);
+    return () => ipcRenderer.removeListener('tls:error-details', listener);
+  },
 });
