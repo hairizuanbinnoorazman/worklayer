@@ -590,6 +590,25 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 }
 
 .nav-btn:hover { background: #2a2a4e; color: #e0e0e0; border-color: #533483; }
+.nav-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 3px 7px;
+  background: #22223a;
+  border-bottom: 1px solid #2a2a3e;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.term-zoom-label {
+  font-size: 11px;
+  color: #889;
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
 
 .url-input {
   flex: 1;
