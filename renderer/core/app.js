@@ -31,6 +31,11 @@ function getProfileIgnoreTlsErrors(profile) {
   return !!profile.ignoreTlsErrors;
 }
 
+function getProfileDefaultTermFontSize(profile) {
+  if (!profile || profile.defaultTermFontSize === undefined) return 13;
+  return profile.defaultTermFontSize;
+}
+
 function syncTlsIgnoreToMain() {
   if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
     window.electronAPI.tlsSetIgnoreAll(getProfileIgnoreTlsErrors(getActiveProfile()));
@@ -109,6 +114,9 @@ function migrateProfile(profile) {
   }
   if (!profile.maxPanels) {
     profile.maxPanels = { terminal: MAX_TERMINAL_PANELS, web: MAX_WEB_PANELS, file: MAX_FILE_PANELS };
+  }
+  if (profile.defaultTermFontSize === undefined) {
+    profile.defaultTermFontSize = 13;
   }
 }
 
@@ -554,6 +562,13 @@ function updatePanelUrl(panelId, url) {
   if (panel) { panel.url = url; saveState(); }
 }
 
+function updatePanelFontSize(panelId, fontSize) {
+  const group = getActiveGroup();
+  if (!group) return;
+  const panel = group.panels.find(p => p.id === panelId);
+  if (panel) { panel.fontSize = fontSize; saveState(); }
+}
+
 function updatePanelWidth(panelId, width) {
   const group = getActiveGroup();
   if (!group) return;
@@ -894,6 +909,27 @@ document.addEventListener('keydown', e => {
       if (refreshBtn) refreshBtn.click();
     }
   }
+});
+
+// ── Global Cmd+= / Cmd+- / Cmd+0 for terminal zoom ──
+document.addEventListener('keydown', e => {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  const isZoomIn = (e.key === '=' || e.key === '+');
+  const isZoomOut = (e.key === '-');
+  const isZoomReset = (e.key === '0');
+  if (!isZoomIn && !isZoomOut && !isZoomReset) return;
+  if (!focusedPanelId) return;
+  const group = getActiveGroup();
+  if (!group) return;
+  const panel = group.panels.find(p => p.id === focusedPanelId);
+  if (!panel || panel.type !== 'terminal') return;
+  e.preventDefault();
+  const panelEl = document.querySelector(`[data-panel-id="${focusedPanelId}"]`);
+  if (!panelEl) return;
+  const termContainer = panelEl.querySelector('.term-container');
+  if (!termContainer) return;
+  const evtName = isZoomIn ? 'term-zoom-in' : isZoomOut ? 'term-zoom-out' : 'term-zoom-reset';
+  termContainer.dispatchEvent(new CustomEvent(evtName));
 });
 
 document.addEventListener('DOMContentLoaded', init);

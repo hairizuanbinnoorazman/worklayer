@@ -93,6 +93,25 @@ function showProfileSettingsModal(profile) {
   tlsField.appendChild(tlsLabel);
   container.appendChild(tlsField);
 
+  // ── Default terminal font size ──
+  const fontSizeField = document.createElement('div');
+  fontSizeField.className = 'modal-field';
+
+  const fontSizeLbl = document.createElement('label');
+  fontSizeLbl.className = 'modal-label';
+  fontSizeLbl.textContent = 'Default Terminal Font Size (px)';
+
+  const fontSizeInput = document.createElement('input');
+  fontSizeInput.className = 'modal-input';
+  fontSizeInput.type = 'number';
+  fontSizeInput.min = '8';
+  fontSizeInput.max = '32';
+  fontSizeInput.value = getProfileDefaultTermFontSize(profile);
+
+  fontSizeField.appendChild(fontSizeLbl);
+  fontSizeField.appendChild(fontSizeInput);
+  container.appendChild(fontSizeField);
+
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
 
@@ -127,6 +146,8 @@ function showProfileSettingsModal(profile) {
     profile.maxPanels = newMaxPanels;
     profile.interceptPdf = pdfCheckbox.checked;
     profile.ignoreTlsErrors = tlsCheckbox.checked;
+    const fsVal = parseInt(fontSizeInput.value, 10);
+    profile.defaultTermFontSize = (!isNaN(fsVal) && fsVal >= 8 && fsVal <= 32) ? fsVal : 13;
     saveState();
     renderStatusBar();
     if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
