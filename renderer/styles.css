@@ -1026,7 +1026,18 @@ webview {
   border-bottom: 1px solid #2a2a3e;
   gap: 6px;
   flex-shrink: 0;
-  justify-content: flex-end;
+}
+
+.editor-zoom-label {
+  font-size: 11px;
+  color: #889;
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+
+.editor-toolbar .editor-save-btn {
+  margin-left: auto;
 }
 
 .editor-save-btn,

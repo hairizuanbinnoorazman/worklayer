@@ -112,6 +112,25 @@ function showProfileSettingsModal(profile) {
   fontSizeField.appendChild(fontSizeInput);
   container.appendChild(fontSizeField);
 
+  // ── Default file panel font size ──
+  const fileFontSizeField = document.createElement('div');
+  fileFontSizeField.className = 'modal-field';
+
+  const fileFontSizeLbl = document.createElement('label');
+  fileFontSizeLbl.className = 'modal-label';
+  fileFontSizeLbl.textContent = 'Default File Font Size (px)';
+
+  const fileFontSizeInput = document.createElement('input');
+  fileFontSizeInput.className = 'modal-input';
+  fileFontSizeInput.type = 'number';
+  fileFontSizeInput.min = '8';
+  fileFontSizeInput.max = '32';
+  fileFontSizeInput.value = getProfileDefaultFileFontSize(profile);
+
+  fileFontSizeField.appendChild(fileFontSizeLbl);
+  fileFontSizeField.appendChild(fileFontSizeInput);
+  container.appendChild(fileFontSizeField);
+
   const footer = document.createElement('div');
   footer.className = 'modal-footer';
 
@@ -148,6 +167,8 @@ function showProfileSettingsModal(profile) {
     profile.ignoreTlsErrors = tlsCheckbox.checked;
     const fsVal = parseInt(fontSizeInput.value, 10);
     profile.defaultTermFontSize = (!isNaN(fsVal) && fsVal >= 8 && fsVal <= 32) ? fsVal : 13;
+    const fileFsVal = parseInt(fileFontSizeInput.value, 10);
+    profile.defaultFileFontSize = (!isNaN(fileFsVal) && fileFsVal >= 8 && fileFsVal <= 32) ? fileFsVal : 13;
     saveState();
     renderStatusBar();
     if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {

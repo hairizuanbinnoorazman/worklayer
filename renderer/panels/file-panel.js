@@ -1,5 +1,17 @@
 // file-panel.js - File explorer + Monaco editor panel
 
+const FILE_FONT_SIZES = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
+
+function findFileFontSizeIndex(size) {
+  let closest = 0;
+  let minDiff = Math.abs(FILE_FONT_SIZES[0] - size);
+  for (let i = 1; i < FILE_FONT_SIZES.length; i++) {
+    const diff = Math.abs(FILE_FONT_SIZES[i] - size);
+    if (diff < minDiff) { minDiff = diff; closest = i; }
+  }
+  return closest;
+}
+
 let monacoLoaded = false;
 let monacoLoadPromise = null;
 
@@ -157,8 +169,49 @@ function renderFilePanel(panel, container) {
   const editorArea = document.createElement('div');
   editorArea.className = 'file-editor-area';
 
+  const profile = getActiveProfile();
+  const defaultFontSize = getProfileDefaultFileFontSize(profile);
+  const initialFontSize = panel.fontSize !== undefined ? panel.fontSize : defaultFontSize;
+  let currentFontIndex = findFileFontSizeIndex(initialFontSize);
+
   const toolbar = document.createElement('div');
   toolbar.className = 'editor-toolbar';
+
+  const zoomOutBtn = document.createElement('button');
+  zoomOutBtn.className = 'nav-btn';
+  zoomOutBtn.textContent = '−';
+  zoomOutBtn.title = 'Decrease font size';
+
+  const zoomLabel = document.createElement('span');
+  zoomLabel.className = 'editor-zoom-label';
+  zoomLabel.title = 'Double-click to reset to 13px';
+  zoomLabel.style.cursor = 'pointer';
+
+  const zoomInBtn = document.createElement('button');
+  zoomInBtn.className = 'nav-btn';
+  zoomInBtn.textContent = '+';
+  zoomInBtn.title = 'Increase font size';
+
+  function updateZoomUI() {
+    zoomLabel.textContent = FILE_FONT_SIZES[currentFontIndex] + 'px';
+    zoomOutBtn.disabled = currentFontIndex <= 0;
+    zoomInBtn.disabled = currentFontIndex >= FILE_FONT_SIZES.length - 1;
+  }
+  updateZoomUI();
+
+  function applyZoom(newIndex) {
+    currentFontIndex = Math.max(0, Math.min(FILE_FONT_SIZES.length - 1, newIndex));
+    const fontSize = FILE_FONT_SIZES[currentFontIndex];
+    updateZoomUI();
+    if (currentEditor) {
+      currentEditor.updateOptions({ fontSize });
+    }
+    updatePanelFontSize(panel.id, fontSize);
+  }
+
+  zoomInBtn.addEventListener('click', () => applyZoom(currentFontIndex + 1));
+  zoomOutBtn.addEventListener('click', () => applyZoom(currentFontIndex - 1));
+  zoomLabel.addEventListener('dblclick', () => applyZoom(findFileFontSizeIndex(13)));
 
   const saveBtn = document.createElement('button');
   saveBtn.className = 'editor-save-btn';
@@ -170,9 +223,16 @@ function renderFilePanel(panel, container) {
   lspBtn.textContent = 'LSP';
   lspBtn.title = 'Language Server Settings';
 
+  toolbar.appendChild(zoomOutBtn);
+  toolbar.appendChild(zoomLabel);
+  toolbar.appendChild(zoomInBtn);
   toolbar.appendChild(saveBtn);
   toolbar.appendChild(lspBtn);
   editorArea.appendChild(toolbar);
+
+  editorArea.addEventListener('file-zoom-in', () => applyZoom(currentFontIndex + 1));
+  editorArea.addEventListener('file-zoom-out', () => applyZoom(currentFontIndex - 1));
+  editorArea.addEventListener('file-zoom-reset', () => applyZoom(findFileFontSizeIndex(13)));
 
   const tabBar = document.createElement('div');
   tabBar.className = 'editor-tab-bar';
@@ -455,7 +515,7 @@ function renderFilePanel(panel, container) {
         theme: 'vs-dark',
         automaticLayout: false,
         minimap: { enabled: false },
-        fontSize: 13,
+        fontSize: FILE_FONT_SIZES[currentFontIndex],
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         scrollBeyondLastLine: false,
         wordWrap: 'on',
