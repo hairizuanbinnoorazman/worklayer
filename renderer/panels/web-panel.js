@@ -3,6 +3,19 @@
 // Registry: webContentsId -> { panelId, refresh(), showSearch() }
 const webviewRegistry = new Map();
 
+// Electron zoom levels — factor = 1.2^level, so these span ~58% to ~300% with 100% at index 5.
+const WEB_ZOOM_LEVELS = [-3, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3];
+
+function findWebZoomLevelIndex(level) {
+  let closest = 0;
+  let minDiff = Math.abs(WEB_ZOOM_LEVELS[0] - level);
+  for (let i = 1; i < WEB_ZOOM_LEVELS.length; i++) {
+    const diff = Math.abs(WEB_ZOOM_LEVELS[i] - level);
+    if (diff < minDiff) { minDiff = diff; closest = i; }
+  }
+  return closest;
+}
+
 // Latest TLS cert error details pushed from main, keyed by webContentsId.
 // The certificate-error event fires before did-fail-load, so the warning page
 // renderer can look up details here. One entry per wc — replaced on each error.
@@ -220,6 +233,21 @@ function renderWebPanel(panel, container) {
   // attached to the live DOM with dom-ready fired, but at this point the
   // wrapper hasn't been appended to the panel strip yet.
   webview.src = initialUrl;
+
+  const defaultWebZoom = getProfileDefaultWebZoomLevel(getActiveProfile());
+  const initialZoomLevel = panel.zoomLevel !== undefined ? panel.zoomLevel : defaultWebZoom;
+  let currentZoomIndex = findWebZoomLevelIndex(initialZoomLevel);
+
+  function applyWebZoom(newIndex) {
+    currentZoomIndex = Math.max(0, Math.min(WEB_ZOOM_LEVELS.length - 1, newIndex));
+    const level = WEB_ZOOM_LEVELS[currentZoomIndex];
+    try { webview.setZoomLevel(level); } catch (e) {}
+    updatePanelZoomLevel(panel.id, level);
+  }
+
+  webviewWrapper.addEventListener('web-zoom-in', () => applyWebZoom(currentZoomIndex + 1));
+  webviewWrapper.addEventListener('web-zoom-out', () => applyWebZoom(currentZoomIndex - 1));
+  webviewWrapper.addEventListener('web-zoom-reset', () => applyWebZoom(findWebZoomLevelIndex(0)));
 
   // ── Bookmark overlay ────────────────────────────
 
@@ -580,6 +608,7 @@ function renderWebPanel(panel, container) {
     if (window.electronAPI.cdpRegisterWebview) {
       window.electronAPI.cdpRegisterWebview(webview._webContentsId, panel.id, panel.url || '');
     }
+    try { webview.setZoomLevel(WEB_ZOOM_LEVELS[currentZoomIndex]); } catch (e) {}
   });
 
   // Handle found-in-page results from findInPage

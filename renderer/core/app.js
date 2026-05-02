@@ -41,6 +41,11 @@ function getProfileDefaultFileFontSize(profile) {
   return profile.defaultFileFontSize;
 }
 
+function getProfileDefaultWebZoomLevel(profile) {
+  if (!profile || profile.defaultWebZoomLevel === undefined) return 0;
+  return profile.defaultWebZoomLevel;
+}
+
 function syncTlsIgnoreToMain() {
   if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
     window.electronAPI.tlsSetIgnoreAll(getProfileIgnoreTlsErrors(getActiveProfile()));
@@ -125,6 +130,9 @@ function migrateProfile(profile) {
   }
   if (profile.defaultFileFontSize === undefined) {
     profile.defaultFileFontSize = 13;
+  }
+  if (profile.defaultWebZoomLevel === undefined) {
+    profile.defaultWebZoomLevel = 0;
   }
 }
 
@@ -577,6 +585,13 @@ function updatePanelFontSize(panelId, fontSize) {
   if (panel) { panel.fontSize = fontSize; saveState(); }
 }
 
+function updatePanelZoomLevel(panelId, zoomLevel) {
+  const group = getActiveGroup();
+  if (!group) return;
+  const panel = group.panels.find(p => p.id === panelId);
+  if (panel) { panel.zoomLevel = zoomLevel; saveState(); }
+}
+
 function updatePanelWidth(panelId, width) {
   const group = getActiveGroup();
   if (!group) return;
@@ -945,6 +960,12 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     const evtName = isZoomIn ? 'file-zoom-in' : isZoomOut ? 'file-zoom-out' : 'file-zoom-reset';
     editorArea.dispatchEvent(new CustomEvent(evtName));
+  } else if (panel.type === 'web') {
+    const webviewWrapper = panelEl.querySelector('.webview-wrapper');
+    if (!webviewWrapper) return;
+    e.preventDefault();
+    const evtName = isZoomIn ? 'web-zoom-in' : isZoomOut ? 'web-zoom-out' : 'web-zoom-reset';
+    webviewWrapper.dispatchEvent(new CustomEvent(evtName));
   }
 });
 
