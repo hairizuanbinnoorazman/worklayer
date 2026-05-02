@@ -36,6 +36,11 @@ function getProfileDefaultTermFontSize(profile) {
   return profile.defaultTermFontSize;
 }
 
+function getProfileDefaultFileFontSize(profile) {
+  if (!profile || profile.defaultFileFontSize === undefined) return 13;
+  return profile.defaultFileFontSize;
+}
+
 function syncTlsIgnoreToMain() {
   if (window.electronAPI && window.electronAPI.tlsSetIgnoreAll) {
     window.electronAPI.tlsSetIgnoreAll(getProfileIgnoreTlsErrors(getActiveProfile()));
@@ -117,6 +122,9 @@ function migrateProfile(profile) {
   }
   if (profile.defaultTermFontSize === undefined) {
     profile.defaultTermFontSize = 13;
+  }
+  if (profile.defaultFileFontSize === undefined) {
+    profile.defaultFileFontSize = 13;
   }
 }
 
@@ -911,7 +919,7 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── Global Cmd+= / Cmd+- / Cmd+0 for terminal zoom ──
+// ── Global Cmd+= / Cmd+- / Cmd+0 for terminal & file panel zoom ──
 document.addEventListener('keydown', e => {
   if (!(e.metaKey || e.ctrlKey)) return;
   const isZoomIn = (e.key === '=' || e.key === '+');
@@ -922,14 +930,22 @@ document.addEventListener('keydown', e => {
   const group = getActiveGroup();
   if (!group) return;
   const panel = group.panels.find(p => p.id === focusedPanelId);
-  if (!panel || panel.type !== 'terminal') return;
-  e.preventDefault();
+  if (!panel) return;
   const panelEl = document.querySelector(`[data-panel-id="${focusedPanelId}"]`);
   if (!panelEl) return;
-  const termContainer = panelEl.querySelector('.term-container');
-  if (!termContainer) return;
-  const evtName = isZoomIn ? 'term-zoom-in' : isZoomOut ? 'term-zoom-out' : 'term-zoom-reset';
-  termContainer.dispatchEvent(new CustomEvent(evtName));
+  if (panel.type === 'terminal') {
+    const termContainer = panelEl.querySelector('.term-container');
+    if (!termContainer) return;
+    e.preventDefault();
+    const evtName = isZoomIn ? 'term-zoom-in' : isZoomOut ? 'term-zoom-out' : 'term-zoom-reset';
+    termContainer.dispatchEvent(new CustomEvent(evtName));
+  } else if (panel.type === 'file') {
+    const editorArea = panelEl.querySelector('.file-editor-area');
+    if (!editorArea) return;
+    e.preventDefault();
+    const evtName = isZoomIn ? 'file-zoom-in' : isZoomOut ? 'file-zoom-out' : 'file-zoom-reset';
+    editorArea.dispatchEvent(new CustomEvent(evtName));
+  }
 });
 
 document.addEventListener('DOMContentLoaded', init);
