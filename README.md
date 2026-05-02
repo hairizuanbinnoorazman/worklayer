@@ -20,14 +20,20 @@ Inspired by [Niri](https://wiki.archlinux.org/title/Niri)'s scrollable tiling wi
 - **Terminal browser interception** — OAuth flows and CLI-opened URLs (e.g. `gh auth login`) open as adjacent web panels instead of system browser
 - **Panel search** — Ctrl+F / Cmd+F find-in-page for web panels
 - **Terminal search** — search within terminal output via xterm addon-search
+- **Terminal zoom** — +/− toolbar buttons and Cmd/Ctrl+=/-/0 shortcuts; per-profile default font size for presentations
+- **Editor zoom** — +/− toolbar buttons and Cmd/Ctrl+=/-/0 shortcuts on the Monaco file editor; per-profile default font size
 - **LSP integration** — Language Server Protocol support in the file editor (completions, diagnostics, hover) with per-workspace server configuration
 - **HTTP auth modal** — native dialog for HTTP Basic/Proxy authentication in web panels
+- **TLS certificate override** — certificate-error screen with per-panel exemption or profile-wide "ignore all TLS errors" toggle
+- **PDF in web panel** — open PDFs directly in an embedded web panel (toggle per profile)
+- **Image in web panel** — open png/jpg/gif/bmp/ico/webp/svg files in a web panel instead of an external viewer
+- **Debug panel** — dedicated panel type for network request capture, console log viewing, and request route mocking against any web panel
 - **URL frequency tracking** — URL bar suggestions sorted by visit count with weekly decay
 - **Resizable sidebar** — drag the sidebar edge to resize (150-500px), persists across sessions
 - **Status bar** — real-time panel counts and limits display
 - **DOM caching** — smart caching prevents terminal re-initialization when switching workspaces
 - **Auto-saved state** — workspace layout and panel state persist across restarts
-- **MCP server** — built-in Model Context Protocol server for programmatic browser control via Chrome DevTools Protocol (click, type, screenshot, navigate, etc.)
+- **MCP server** — built-in Model Context Protocol server for programmatic browser control via Chrome DevTools Protocol (click, type, screenshot, navigate, plus `network_requests`, `console_messages`, `evaluate`, `route`/`unroute`, etc.)
 
 ## Project Structure
 
@@ -51,6 +57,7 @@ worklayer/
 │   │   ├── web-panel.js           Web panel (webview) component
 │   │   ├── term-panel.js          Terminal panel (xterm.js) component
 │   │   ├── file-panel.js          File browser + Monaco editor component
+│   │   ├── debug-panel.js         Network/console debug panel component
 │   │   ├── panel-search.js        Web panel find-in-page search
 │   │   ├── panel-drag.js          Drag-to-resize and reorder handles
 │   │   ├── status-bar.js          Panel count status indicator
@@ -114,3 +121,4 @@ The built-in MCP server allows external tools to control web panels programmatic
 |---|---|
 | `WORKLAYER_MCP_PORT` | Port the MCP server listens on |
 | `WORKLAYER_MCP_TOKEN` | Bearer token for authenticating requests |
+| `WORKLAYER_DEBUG_CONSOLE` | Set to `1` to forward webview console messages to the main process log (off by default to avoid sync-write overhead on chatty pages) |
