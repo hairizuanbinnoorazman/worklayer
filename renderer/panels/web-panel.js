@@ -374,6 +374,7 @@ function renderWebPanel(panel, container) {
   let crashRetryCount = 0;
   let errorPageShownForUrl = null;
   let navigateInFlight = false;
+  let retryInProgress = false;
 
   // DOM-based error overlay shown when webview.loadURL() itself is broken
   function showErrorOverlay(url, errorDescription) {
@@ -527,9 +528,11 @@ function renderWebPanel(panel, container) {
     lastRealUrl = url;
     errorPageShownForUrl = null;
     navigateInFlight = true;
+    retryInProgress = true;
     removeErrorOverlay();
     loadURLWithRetry(webview, url, 2, (err) => {
       navigateInFlight = false;
+      retryInProgress = false;
       console.log(`[WebPanel] loadURL failed (navigate) panel=${panel.id} url=${url} error=${err.message}`);
       showErrorPage(url, err.message, -2);
     });
@@ -625,11 +628,12 @@ function renderWebPanel(panel, container) {
   webview.addEventListener('did-navigate', e => {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     navigateInFlight = false;
-    errorPageShownForUrl = null;
+    retryInProgress = false;
     removeErrorOverlay();
     const tlsOverlay = webviewWrapper.querySelector('.webview-tls-overlay');
     if (tlsOverlay) tlsOverlay.remove();
     if (!e.url.startsWith('data:')) {
+      errorPageShownForUrl = null;
       lastRealUrl = e.url;
       crashRetryCount = 0;
       urlInput.value = e.url;
@@ -659,8 +663,10 @@ function renderWebPanel(panel, container) {
   });
 
   webview.addEventListener('did-fail-load', e => {
-    console.log(`[WebPanel] did-fail-load panel=${panel.id} error=${e.errorDescription} code=${e.errorCode} url=${e.validatedURL}`);
+    console.log(`[WebPanel] did-fail-load panel=${panel.id} error=${e.errorDescription} code=${e.errorCode} url=${e.validatedURL} isMainFrame=${e.isMainFrame}`);
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
+    if (!e.isMainFrame) return;
+    if (retryInProgress) return;
     const failUrl = e.validatedURL || lastRealUrl || '';
     if (isCertErrorCode(e.errorCode)) {
       showTlsWarningPage(failUrl, e.errorDescription, e.errorCode);
@@ -672,6 +678,7 @@ function renderWebPanel(panel, container) {
   // Handle errors dispatched from navigateWebPanel in app.js
   webview.addEventListener('loadurl-error', e => {
     if (e.detail.message && e.detail.message.includes('ERR_ABORTED')) return;
+    if (retryInProgress) return;
     console.log(`[WebPanel] loadurl-error (custom) panel=${panel.id} url=${e.detail.url} error=${e.detail.message}`);
     showErrorPage(e.detail.url, e.detail.message, -2);
   });
@@ -684,9 +691,11 @@ function renderWebPanel(panel, container) {
 
     if (crashRetryCount < 5 && lastRealUrl) {
       crashRetryCount++;
+      retryInProgress = true;
       console.log(`[WebPanel] Auto-retry ${crashRetryCount}/5 for panel=${panel.id} url=${lastRealUrl}`);
       setTimeout(() => {
         loadURLWithRetry(webview, lastRealUrl, 1, (err) => {
+          retryInProgress = false;
           console.log(`[WebPanel] loadURL failed (crash-retry) panel=${panel.id} url=${lastRealUrl} error=${err.message}`);
           showErrorPage(lastRealUrl, err.message, -2);
         });
