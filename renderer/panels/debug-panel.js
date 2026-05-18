@@ -108,6 +108,21 @@ async function mountDebugPanel(panel, ui) {
   async function refreshPanelList() {
     try {
       const panels = await window.electronAPI.debugListPanels();
+
+      const newValues = panels.map(p => String(p.webContentsId));
+      const existingOptions = ui.panelSelect.querySelectorAll('option:not([value=""])');
+      const existingValues = Array.from(existingOptions).map(o => o.value);
+
+      const newLabels = panels.map(p => `${p.title || p.url || p.panelId} (${p.panelId})`);
+      const existingLabels = Array.from(existingOptions).map(o => o.textContent);
+
+      // Skip rebuild if nothing changed — prevents closing an open dropdown
+      if (newValues.length === existingValues.length &&
+          newValues.every((v, i) => v === existingValues[i]) &&
+          newLabels.every((l, i) => l === existingLabels[i])) {
+        return;
+      }
+
       ui.panelSelect.innerHTML = '';
       const emptyOpt = document.createElement('option');
       emptyOpt.value = '';
