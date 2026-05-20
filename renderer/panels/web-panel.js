@@ -503,9 +503,10 @@ function renderWebPanel(panel, container) {
     errorPageShownForUrl = url;
     loadingBar.classList.remove('active');
     const retryUrl = url || lastRealUrl || '';
+    const desc = errorDescription || 'Unknown error';
 
     if (errorPageLoadFailed) {
-      showErrorOverlay(retryUrl, errorDescription);
+      try { showErrorOverlay(retryUrl, desc); } catch (e) {}
       return;
     }
 
@@ -516,16 +517,22 @@ function renderWebPanel(panel, container) {
           <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
           <h2 style="margin: 0 0 0.5rem;">Failed to load page</h2>
           <p style="color: #a6adc8; margin: 0 0 1rem;">${url || ''}</p>
-          <p style="color: #f38ba8;">${errorDescription || 'Unknown error'} (${errorCode})</p>
+          <p style="color: #f38ba8;">${desc} (${errorCode})</p>
           ${retryUrl ? `<button data-url="${encodeURIComponent(retryUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Retry</button>` : ''}
         </div>
       </body>
       </html>`;
-    webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage)).catch(err => {
-      console.log(`[WebPanel] Error page loadURL also failed panel=${panel.id}, falling back to overlay`);
+    try {
+      webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage)).catch(err => {
+        console.log(`[WebPanel] Error page loadURL rejected panel=${panel.id}, falling back to overlay`);
+        errorPageLoadFailed = true;
+        try { showErrorOverlay(retryUrl, desc); } catch (e) {}
+      });
+    } catch (err) {
+      console.log(`[WebPanel] Error page loadURL threw panel=${panel.id}, falling back to overlay`);
       errorPageLoadFailed = true;
-      showErrorOverlay(retryUrl, errorDescription);
-    });
+      try { showErrorOverlay(retryUrl, desc); } catch (e) {}
+    }
   }
 
   const navigate = (raw) => {
