@@ -105,13 +105,32 @@ function matchUrlPattern(pattern, url) {
   }
 }
 
+function deduplicateCookies(cookies) {
+  const seen = new Map();
+  for (const c of cookies) {
+    const key = `${c.name}|${c.path || '/'}|${(c.domain || '').replace(/^\./, '')}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, c);
+    } else {
+      const existingIsHostOnly = !existing.domain.startsWith('.');
+      const currentIsHostOnly = !c.domain.startsWith('.');
+      if (currentIsHostOnly && !existingIsHostOnly) {
+        seen.set(key, c);
+      }
+    }
+  }
+  return Array.from(seen.values());
+}
+
 function saveSessionCookies() {
   if (!cookieBackupFile) return;
   const ses = session.fromPartition('persist:webpanels');
   ses.cookies.get({}).then(allCookies => {
     const sessionCookies = allCookies.filter(c => !c.expirationDate);
-    fs.writeFileSync(cookieBackupFile, JSON.stringify(sessionCookies, null, 2));
-    debugLog('[CookieSave] Saved', sessionCookies.length, 'session cookies (of', allCookies.length, 'total)');
+    const deduplicated = deduplicateCookies(sessionCookies);
+    fs.writeFileSync(cookieBackupFile, JSON.stringify(deduplicated, null, 2));
+    debugLog('[CookieSave] Saved', deduplicated.length, 'session cookies (of', allCookies.length, 'total,', sessionCookies.length - deduplicated.length, 'duplicates removed)');
   }).catch(e => {
     debugLog('[CookieSave] Failed:', e.message);
   });
@@ -1206,8 +1225,8 @@ app.whenReady().then(async () => {
     if (backupExists) {
       const raw = fs.readFileSync(cookieBackupFile, 'utf-8');
       debugLog('Cookie backup file size:', raw.length, 'bytes');
-      const backed = JSON.parse(raw);
-      debugLog('Parsed', backed.length, 'cookies from backup');
+      const backed = deduplicateCookies(JSON.parse(raw));
+      debugLog('Parsed', backed.length, 'cookies from backup (after dedup)');
       let restored = 0;
       let failed = 0;
       for (const cookie of backed) {
@@ -1215,17 +1234,20 @@ app.whenReady().then(async () => {
         const domain = cookie.domain.startsWith('.')
           ? cookie.domain.substring(1) : cookie.domain;
         const url = `${protocol}://${domain}${cookie.path || '/'}`;
+        const opts = {
+          url,
+          name: cookie.name,
+          value: cookie.value,
+          path: cookie.path || '/',
+          secure: cookie.secure,
+          httpOnly: cookie.httpOnly,
+          sameSite: cookie.sameSite || 'unspecified',
+        };
+        if (cookie.domain.startsWith('.')) {
+          opts.domain = cookie.domain;
+        }
         try {
-          await ses.cookies.set({
-            url,
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path || '/',
-            secure: cookie.secure,
-            httpOnly: cookie.httpOnly,
-            sameSite: cookie.sameSite || 'unspecified',
-          });
+          await ses.cookies.set(opts);
           restored++;
         } catch (e) {
           failed++;
