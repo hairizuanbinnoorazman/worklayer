@@ -102,11 +102,20 @@ function isAbortedError(err) {
   return err && err.message && err.message.includes('ERR_ABORTED');
 }
 
+function isNonRetryableError(err) {
+  if (!err || !err.message) return false;
+  return err.message.includes('ERR_FAILED') && err.message.includes('GUEST_VIEW_MANAGER');
+}
+
 function loadURLWithRetry(webview, url, maxRetries, onFail) {
   let attempt = 0;
   function tryLoad() {
     webview.loadURL(url).catch(err => {
       if (isAbortedError(err)) return;
+      if (isNonRetryableError(err)) {
+        onFail(err);
+        return;
+      }
       attempt++;
       if (attempt <= maxRetries) {
         console.log(`[WebPanel] loadURL retry ${attempt}/${maxRetries} url=${url} error=${err.message}`);
@@ -487,11 +496,19 @@ function renderWebPanel(panel, container) {
     });
   }
 
+  let errorPageLoadFailed = false;
+
   function showErrorPage(url, errorDescription, errorCode) {
     if (errorPageShownForUrl === url) return;
     errorPageShownForUrl = url;
     loadingBar.classList.remove('active');
     const retryUrl = url || lastRealUrl || '';
+
+    if (errorPageLoadFailed) {
+      showErrorOverlay(retryUrl, errorDescription);
+      return;
+    }
+
     const errorPage = `
       <html>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
@@ -506,7 +523,8 @@ function renderWebPanel(panel, container) {
       </html>`;
     webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(errorPage)).catch(err => {
       console.log(`[WebPanel] Error page loadURL also failed panel=${panel.id}, falling back to overlay`);
-      showErrorOverlay(url, errorDescription);
+      errorPageLoadFailed = true;
+      showErrorOverlay(retryUrl, errorDescription);
     });
   }
 
@@ -629,6 +647,7 @@ function renderWebPanel(panel, container) {
     console.log(`[WebPanel] did-navigate panel=${panel.id} url=${e.url}`);
     navigateInFlight = false;
     retryInProgress = false;
+    errorPageLoadFailed = false;
     removeErrorOverlay();
     const tlsOverlay = webviewWrapper.querySelector('.webview-tls-overlay');
     if (tlsOverlay) tlsOverlay.remove();
@@ -667,6 +686,7 @@ function renderWebPanel(panel, container) {
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
     if (!e.isMainFrame) return;
     if (retryInProgress) return;
+    if (e.validatedURL && e.validatedURL.startsWith('data:')) return;
     const failUrl = e.validatedURL || lastRealUrl || '';
     if (isCertErrorCode(e.errorCode)) {
       showTlsWarningPage(failUrl, e.errorDescription, e.errorCode);
@@ -702,6 +722,13 @@ function renderWebPanel(panel, container) {
       }, 500);
     } else {
       console.log(`[WebPanel] Max retries reached for panel=${panel.id}, showing error page`);
+      const crashMsg = `The renderer process exited unexpectedly (${reason})`;
+
+      if (errorPageLoadFailed) {
+        showErrorOverlay(lastRealUrl, crashMsg);
+        return;
+      }
+
       const crashPage = `
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
@@ -709,14 +736,15 @@ function renderWebPanel(panel, container) {
             <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
             <h2 style="margin: 0 0 0.5rem;">Page crashed</h2>
             <p style="color: #a6adc8; margin: 0 0 1rem;">${lastRealUrl || ''}</p>
-            <p style="color: #f38ba8;">The renderer process exited unexpectedly (${reason})</p>
+            <p style="color: #f38ba8;">${crashMsg}</p>
             ${lastRealUrl ? `<button data-url="${encodeURIComponent(lastRealUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Reload</button>` : ''}
           </div>
         </body>
         </html>`;
       webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(crashPage)).catch(err => {
         console.log(`[WebPanel] Crash page loadURL also failed panel=${panel.id}, falling back to overlay`);
-        showErrorOverlay(lastRealUrl, `The renderer process exited unexpectedly (${reason})`);
+        errorPageLoadFailed = true;
+        showErrorOverlay(lastRealUrl, crashMsg);
       });
     }
   });
