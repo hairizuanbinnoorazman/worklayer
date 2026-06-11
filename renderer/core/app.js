@@ -664,8 +664,22 @@ function navigateWebPanel(panelId, url) {
     let navAttempt = 0;
     const maxNavRetries = 2;
     function tryNav() {
-      webview.loadURL(normalizedUrl).catch(err => {
+      let promise;
+      try {
+        promise = webview.loadURL(normalizedUrl);
+      } catch (err) {
+        console.log(`[navigateWebPanel] loadURL threw panelId=${panelId} url=${normalizedUrl} error=${err.message}`);
+        webview.dispatchEvent(new CustomEvent('loadurl-error', {
+          detail: { url: normalizedUrl, message: err.message }
+        }));
+        return;
+      }
+      if (!promise || typeof promise.catch !== 'function') return;
+      promise.catch(err => {
         if (err && err.message && err.message.includes('ERR_ABORTED')) return;
+        // ERR_FAILED(-2) / GUEST_VIEW_MANAGER after a crash is transient: the guest
+        // WebContents survives and loadURL spawns a fresh renderer, so a retry lands
+        // on the live process. Retrying (not bailing) is what unsticks a crashed panel.
         navAttempt++;
         if (navAttempt <= maxNavRetries) {
           console.log(`[navigateWebPanel] retry ${navAttempt}/${maxNavRetries} url=${normalizedUrl} error=${err.message}`);

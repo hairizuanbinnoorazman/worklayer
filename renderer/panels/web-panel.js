@@ -71,10 +71,28 @@ if (window.electronAPI.onWebviewFind) {
 if (window.electronAPI.onWebviewOpenInNewPanel) {
   window.electronAPI.onWebviewOpenInNewPanel(({ url, sourceWebContentsId, disposition }) => {
     const entry = webviewRegistry.get(sourceWebContentsId);
+    let newPanelId;
     if (disposition === 'foreground-tab' && entry) {
-      addWebPanelAfter(entry.panelId, url);
+      newPanelId = addWebPanelAfter(entry.panelId, url);
     } else {
-      addWebPanelAtEnd(url);
+      newPanelId = addWebPanelAtEnd(url);
+    }
+    // The incremental insert in addWebPanelAt() does not scroll the strip, so a
+    // panel opened from a link can land off-screen and look like "nothing happened".
+    // Reveal it. A background-tab disposition keeps the user where they are.
+    if (newPanelId && disposition !== 'background-tab') {
+      scrollPanelIntoView(newPanelId);
+    }
+  });
+}
+
+// Scroll the panel strip so the given panel is visible. Runs after the DOM
+// settles (rAF) since the panel element may have just been inserted.
+function scrollPanelIntoView(panelId) {
+  requestAnimationFrame(() => {
+    const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
+    if (panelEl) {
+      panelEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
     }
   });
 }
@@ -102,23 +120,46 @@ function isAbortedError(err) {
   return err && err.message && err.message.includes('ERR_ABORTED');
 }
 
-function isNonRetryableError(err) {
+// A GUEST_VIEW_MANAGER_CALL / ERR_FAILED(-2) rejection from loadURL is TRANSIENT
+// after a renderer crash: the browser-side guest WebContents survives the crash,
+// and Chromium spawns a fresh renderer on the next load. The first loadURL can
+// race that respawn and reject, but a retry lands on the live process. So these
+// must be RETRIED, not treated as terminal. (Verified against Electron 28.3.3:
+// webview.src= would just call loadURL internally and swallow the same rejection.)
+function isTransientGuestError(err) {
   if (!err || !err.message) return false;
-  return err.message.includes('ERR_FAILED') && err.message.includes('GUEST_VIEW_MANAGER');
+  return err.message.includes('GUEST_VIEW_MANAGER') ||
+    err.code === 'ERR_FAILED' ||
+    (err.message.includes('ERR_FAILED') && err.message.includes('(-2)'));
 }
 
 function loadURLWithRetry(webview, url, maxRetries, onFail) {
   let attempt = 0;
   function tryLoad() {
-    webview.loadURL(url).catch(err => {
-      if (isAbortedError(err)) return;
-      if (isNonRetryableError(err)) {
-        onFail(err);
-        return;
-      }
+    let promise;
+    try {
+      promise = webview.loadURL(url);
+    } catch (err) {
+      // A synchronous throw still gets retries — same transient-respawn reasoning.
       attempt++;
       if (attempt <= maxRetries) {
-        console.log(`[WebPanel] loadURL retry ${attempt}/${maxRetries} url=${url} error=${err.message}`);
+        console.log(`[WebPanel] loadURL threw, retry ${attempt}/${maxRetries} url=${url} error=${err.message}`);
+        setTimeout(tryLoad, 500);
+      } else {
+        onFail(err);
+      }
+      return;
+    }
+    if (!promise || typeof promise.catch !== 'function') {
+      onFail(new Error('loadURL did not return a promise'));
+      return;
+    }
+    promise.catch(err => {
+      if (isAbortedError(err)) return;
+      attempt++;
+      if (attempt <= maxRetries) {
+        const note = isTransientGuestError(err) ? ' (transient guest error)' : '';
+        console.log(`[WebPanel] loadURL retry ${attempt}/${maxRetries}${note} url=${url} error=${err.message}`);
         setTimeout(tryLoad, 500);
       } else {
         onFail(err);
@@ -384,6 +425,9 @@ function renderWebPanel(panel, container) {
   let errorPageShownForUrl = null;
   let navigateInFlight = false;
   let retryInProgress = false;
+  let guestViewBroken = false;
+  let rendererDead = false;
+  let crashRetryTimer = null;
 
   // DOM-based error overlay shown when webview.loadURL() itself is broken
   function showErrorOverlay(url, errorDescription) {
@@ -505,7 +549,7 @@ function renderWebPanel(panel, container) {
     const retryUrl = url || lastRealUrl || '';
     const desc = errorDescription || 'Unknown error';
 
-    if (errorPageLoadFailed) {
+    if (errorPageLoadFailed || guestViewBroken || rendererDead) {
       try { showErrorOverlay(retryUrl, desc); } catch (e) {}
       return;
     }
@@ -539,7 +583,7 @@ function renderWebPanel(panel, container) {
     let url = raw.trim();
     if (!url) return;
     hideBookmarkOverlay();
-    if (navigateInFlight) {
+    if (navigateInFlight && !guestViewBroken && !rendererDead) {
       console.log(`[WebPanel] navigate blocked — already in flight panel=${panel.id}`);
       return;
     }
@@ -550,12 +594,20 @@ function renderWebPanel(panel, container) {
         url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
       }
     }
+    // Reset broken state — user explicitly navigating should always unstick the panel.
+    // loadURLWithRetry retries the transient post-crash guest error, so a navigation
+    // away from a crashed page lands on the freshly respawned renderer.
+    if (crashRetryTimer) { clearTimeout(crashRetryTimer); crashRetryTimer = null; }
+    guestViewBroken = false;
+    errorPageLoadFailed = false;
+    rendererDead = false;
+    crashRetryCount = 0;
     lastRealUrl = url;
     errorPageShownForUrl = null;
     navigateInFlight = true;
     retryInProgress = true;
     removeErrorOverlay();
-    loadURLWithRetry(webview, url, 2, (err) => {
+    loadURLWithRetry(webview, url, 3, (err) => {
       navigateInFlight = false;
       retryInProgress = false;
       console.log(`[WebPanel] loadURL failed (navigate) panel=${panel.id} url=${url} error=${err.message}`);
@@ -569,8 +621,13 @@ function renderWebPanel(panel, container) {
   backBtn.addEventListener('click', () => webview.goBack());
   forwardBtn.addEventListener('click', () => webview.goForward());
   refreshBtn.addEventListener('click', () => {
-    const currentUrl = webview.getURL();
-    if (currentUrl.startsWith('data:') && lastRealUrl) {
+    if (guestViewBroken || rendererDead) {
+      if (lastRealUrl) navigate(lastRealUrl);
+      return;
+    }
+    let currentUrl;
+    try { currentUrl = webview.getURL(); } catch (e) { currentUrl = ''; }
+    if ((!currentUrl || currentUrl.startsWith('data:')) && lastRealUrl) {
       navigate(lastRealUrl);
     } else {
       webview.reload();
@@ -655,6 +712,8 @@ function renderWebPanel(panel, container) {
     navigateInFlight = false;
     retryInProgress = false;
     errorPageLoadFailed = false;
+    guestViewBroken = false;
+    rendererDead = false;
     removeErrorOverlay();
     const tlsOverlay = webviewWrapper.querySelector('.webview-tls-overlay');
     if (tlsOverlay) tlsOverlay.remove();
@@ -693,6 +752,7 @@ function renderWebPanel(panel, container) {
     if (e.errorCode === 0 || e.errorCode === -3) return; // ignore aborted loads
     if (!e.isMainFrame) return;
     if (retryInProgress) return;
+    if (guestViewBroken || rendererDead) return;
     if (e.validatedURL && e.validatedURL.startsWith('data:')) return;
     const failUrl = e.validatedURL || lastRealUrl || '';
     if (isCertErrorCode(e.errorCode)) {
@@ -706,54 +766,53 @@ function renderWebPanel(panel, container) {
   webview.addEventListener('loadurl-error', e => {
     if (e.detail.message && e.detail.message.includes('ERR_ABORTED')) return;
     if (retryInProgress) return;
+    if (guestViewBroken || rendererDead) return;
     console.log(`[WebPanel] loadurl-error (custom) panel=${panel.id} url=${e.detail.url} error=${e.detail.message}`);
     showErrorPage(e.detail.url, e.detail.message, -2);
   });
 
-  // Handle renderer crashes with auto-retry
+  // Handle renderer crashes with auto-retry (max 2, not 5 \u2014 prevents tight crash loops)
   webview.addEventListener('render-process-gone', e => {
     const reason = e.reason || 'unknown';
     const exitCode = e.exitCode;
     console.log(`[WebPanel] render-process-gone panel=${panel.id} reason=${reason} exitCode=${exitCode} url=${lastRealUrl}`);
 
-    if (crashRetryCount < 5 && lastRealUrl) {
-      crashRetryCount++;
-      retryInProgress = true;
-      console.log(`[WebPanel] Auto-retry ${crashRetryCount}/5 for panel=${panel.id} url=${lastRealUrl}`);
-      setTimeout(() => {
-        loadURLWithRetry(webview, lastRealUrl, 1, (err) => {
-          retryInProgress = false;
-          console.log(`[WebPanel] loadURL failed (crash-retry) panel=${panel.id} url=${lastRealUrl} error=${err.message}`);
-          showErrorPage(lastRealUrl, err.message, -2);
-        });
-      }, 500);
-    } else {
-      console.log(`[WebPanel] Max retries reached for panel=${panel.id}, showing error page`);
-      const crashMsg = `The renderer process exited unexpectedly (${reason})`;
+    rendererDead = true;
+    navigateInFlight = false;
+    retryInProgress = false;
+    if (crashRetryTimer) { clearTimeout(crashRetryTimer); crashRetryTimer = null; }
 
-      if (errorPageLoadFailed) {
-        showErrorOverlay(lastRealUrl, crashMsg);
-        return;
-      }
-
-      const crashPage = `
-        <html>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #1e1e2e; color: #cdd6f4;">
-          <div style="text-align: center; max-width: 480px; padding: 2rem;">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">\u26a0</div>
-            <h2 style="margin: 0 0 0.5rem;">Page crashed</h2>
-            <p style="color: #a6adc8; margin: 0 0 1rem;">${lastRealUrl || ''}</p>
-            <p style="color: #f38ba8;">${crashMsg}</p>
-            ${lastRealUrl ? `<button data-url="${encodeURIComponent(lastRealUrl)}" onclick="window.location.href=decodeURIComponent(this.dataset.url)" style="margin-top: 1rem; padding: 0.5rem 1.5rem; border: none; border-radius: 6px; background: #89b4fa; color: #1e1e2e; font-size: 1rem; cursor: pointer;">Reload</button>` : ''}
-          </div>
-        </body>
-        </html>`;
-      webview.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(crashPage)).catch(err => {
-        console.log(`[WebPanel] Crash page loadURL also failed panel=${panel.id}, falling back to overlay`);
-        errorPageLoadFailed = true;
-        showErrorOverlay(lastRealUrl, crashMsg);
-      });
+    if (guestViewBroken || crashRetryCount >= 2) {
+      console.log(`[WebPanel] webview unrecoverable, showing overlay panel=${panel.id}`);
+      guestViewBroken = true;
+      showErrorOverlay(lastRealUrl, `Page crashed (${reason}). Enter a URL to navigate away.`);
+      return;
     }
+
+    if (!lastRealUrl) {
+      guestViewBroken = true;
+      showErrorOverlay('', `Page crashed (${reason}).`);
+      return;
+    }
+
+    crashRetryCount++;
+    retryInProgress = true;
+    console.log(`[WebPanel] Auto-retry ${crashRetryCount}/2 for panel=${panel.id} url=${lastRealUrl}`);
+    crashRetryTimer = setTimeout(() => {
+      crashRetryTimer = null;
+      rendererDead = false;
+      // The browser-side guest WebContents survives the crash; loadURL on it spawns
+      // a fresh renderer. loadURLWithRetry absorbs the transient GUEST_VIEW_MANAGER /
+      // ERR_FAILED(-2) rejection that can race the respawn. On success, did-navigate
+      // clears retryInProgress/rendererDead; on exhaustion, onFail clears them and
+      // surfaces the overlay (so flags never get stuck).
+      loadURLWithRetry(webview, lastRealUrl, 2, (err) => {
+        retryInProgress = false;
+        guestViewBroken = true;
+        console.log(`[WebPanel] loadURL failed (crash-retry) panel=${panel.id} url=${lastRealUrl} error=${err.message}`);
+        showErrorOverlay(lastRealUrl, `Page crashed (${reason}). Enter a URL to navigate away.`);
+      });
+    }, 1000);
   });
 
   // Focus tracking when webview gains focus; stop search capture so keystrokes go to webview
