@@ -191,6 +191,16 @@ function onDragEnd() {
         try { fitAddon.fit(); } catch (e) {}
       }
     }
+
+    // Re-apply zoom if a web panel was moved. Moving a <webview> in the DOM
+    // recreates its guest WebContents, which resets zoom to the default —
+    // re-push the panel's persisted zoom level onto the new guest.
+    if (typeof activeWebPanels !== 'undefined' && activeWebPanels.has(panelId)) {
+      const entry = activeWebPanels.get(panelId);
+      if (entry && entry.reapplyZoom) {
+        try { entry.reapplyZoom(); } catch (e) {}
+      }
+    }
   }
 
   dragState = null;

@@ -64,6 +64,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('webview:find', listener);
     return () => ipcRenderer.removeListener('webview:find', listener);
   },
+  onWebviewFocus: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:focus', listener);
+    return () => ipcRenderer.removeListener('webview:focus', listener);
+  },
+  onWebviewZoom: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('webview:zoom', listener);
+    return () => ipcRenderer.removeListener('webview:zoom', listener);
+  },
   onWebviewOpenInNewPanel: (callback) => {
     const listener = (_, data) => callback(data);
     ipcRenderer.on('webview:open-in-new-panel', listener);

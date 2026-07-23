@@ -42,6 +42,17 @@ function renderTermPanel(panel, container) {
   }
   updateZoomUI();
 
+  // Re-derive the panel's current font index from live state. The panel may
+  // have been rearranged or re-rendered since this closure was created, so the
+  // cached `currentIndex` can be stale — read the persisted fontSize fresh.
+  function liveFontIndex() {
+    const livePanel = getActivePanelById(panel.id) || panel;
+    const size = livePanel.fontSize !== undefined
+      ? livePanel.fontSize
+      : getProfileDefaultTermFontSize(getActiveProfile());
+    return findFontSizeIndex(size);
+  }
+
   function applyZoom(newIndex) {
     currentIndex = Math.max(0, Math.min(TERM_FONT_SIZES.length - 1, newIndex));
     const fontSize = TERM_FONT_SIZES[currentIndex];
@@ -54,8 +65,8 @@ function renderTermPanel(panel, container) {
     updatePanelFontSize(panel.id, fontSize);
   }
 
-  zoomInBtn.addEventListener('click', () => applyZoom(currentIndex + 1));
-  zoomOutBtn.addEventListener('click', () => applyZoom(currentIndex - 1));
+  zoomInBtn.addEventListener('click', () => applyZoom(liveFontIndex() + 1));
+  zoomOutBtn.addEventListener('click', () => applyZoom(liveFontIndex() - 1));
   zoomLabel.addEventListener('dblclick', () => {
     applyZoom(findFontSizeIndex(13));
   });
@@ -72,8 +83,8 @@ function renderTermPanel(panel, container) {
   container.appendChild(termContainer);
 
   // Listen for keyboard shortcut events dispatched from app.js
-  termContainer.addEventListener('term-zoom-in', () => applyZoom(currentIndex + 1));
-  termContainer.addEventListener('term-zoom-out', () => applyZoom(currentIndex - 1));
+  termContainer.addEventListener('term-zoom-in', () => applyZoom(liveFontIndex() + 1));
+  termContainer.addEventListener('term-zoom-out', () => applyZoom(liveFontIndex() - 1));
   termContainer.addEventListener('term-zoom-reset', () => applyZoom(findFontSizeIndex(13)));
 
   mountTerminal(panel, termContainer, TERM_FONT_SIZES[currentIndex]);

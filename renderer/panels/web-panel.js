@@ -68,6 +68,34 @@ if (window.electronAPI.onWebviewFind) {
     if (entry) entry.showSearch();
   });
 }
+// Keep focusedPanelId in sync when a guest gains focus. The host-side <webview>
+// 'focus' DOM event is unreliable for guest->guest transitions, so the main
+// process forwards a reliable focus signal keyed by webContentsId.
+if (window.electronAPI.onWebviewFocus) {
+  window.electronAPI.onWebviewFocus(({ webContentsId }) => {
+    const entry = webviewRegistry.get(webContentsId);
+    if (entry) setFocusedPanel(entry.panelId);
+  });
+}
+// Zoom (Cmd+=/-/0) forwarded from the main process when a webview guest is
+// focused — the keystroke never reaches the renderer's global keydown handler.
+// Resolve the panel fresh from webContentsId and dispatch the same CustomEvent
+// the wrapper already listens for, so zoom hits the panel that actually has
+// focus rather than a stale focusedPanelId.
+if (window.electronAPI.onWebviewZoom) {
+  window.electronAPI.onWebviewZoom(({ webContentsId, direction }) => {
+    const entry = webviewRegistry.get(webContentsId);
+    if (!entry) return;
+    setFocusedPanel(entry.panelId);
+    const panelEl = document.querySelector(`[data-panel-id="${entry.panelId}"]`);
+    if (!panelEl) return;
+    const wrapper = panelEl.querySelector('.webview-wrapper');
+    if (!wrapper) return;
+    const evtName = direction === 'in' ? 'web-zoom-in'
+      : direction === 'out' ? 'web-zoom-out' : 'web-zoom-reset';
+    wrapper.dispatchEvent(new CustomEvent(evtName));
+  });
+}
 if (window.electronAPI.onWebviewOpenInNewPanel) {
   window.electronAPI.onWebviewOpenInNewPanel(({ url, sourceWebContentsId, disposition }) => {
     const entry = webviewRegistry.get(sourceWebContentsId);
@@ -133,7 +161,7 @@ function isTransientGuestError(err) {
     (err.message.includes('ERR_FAILED') && err.message.includes('(-2)'));
 }
 
-function loadURLWithRetry(webview, url, maxRetries, onFail) {
+function loadURLWithRetry(webview, url, maxRetries, onFail, onAbort) {
   let attempt = 0;
   function tryLoad() {
     let promise;
@@ -155,7 +183,14 @@ function loadURLWithRetry(webview, url, maxRetries, onFail) {
       return;
     }
     promise.catch(err => {
-      if (isAbortedError(err)) return;
+      if (isAbortedError(err)) {
+        // ERR_ABORTED means the navigation never happened — e.g. a beforeunload
+        // handler on a page with unsaved edits cancelled it, or the user chose
+        // "Stay". This is NOT a retry case, but the caller's in-flight guard must
+        // be released or the panel stays locked and refuses all future navigation.
+        if (onAbort) onAbort(err);
+        return;
+      }
       attempt++;
       if (attempt <= maxRetries) {
         const note = isTransientGuestError(err) ? ' (transient guest error)' : '';
@@ -288,6 +323,17 @@ function renderWebPanel(panel, container) {
   const initialZoomLevel = panel.zoomLevel !== undefined ? panel.zoomLevel : defaultWebZoom;
   let currentZoomIndex = findWebZoomLevelIndex(initialZoomLevel);
 
+  // Re-derive the panel's current zoom index from live state. The panel may
+  // have been rearranged or re-rendered since this closure was created, so the
+  // cached `currentZoomIndex` can be stale — read the persisted zoomLevel fresh.
+  function liveZoomIndex() {
+    const livePanel = getActivePanelById(panel.id) || panel;
+    const level = livePanel.zoomLevel !== undefined
+      ? livePanel.zoomLevel
+      : getProfileDefaultWebZoomLevel(getActiveProfile());
+    return findWebZoomLevelIndex(level);
+  }
+
   function applyWebZoom(newIndex) {
     currentZoomIndex = Math.max(0, Math.min(WEB_ZOOM_LEVELS.length - 1, newIndex));
     const level = WEB_ZOOM_LEVELS[currentZoomIndex];
@@ -295,8 +341,8 @@ function renderWebPanel(panel, container) {
     updatePanelZoomLevel(panel.id, level);
   }
 
-  webviewWrapper.addEventListener('web-zoom-in', () => applyWebZoom(currentZoomIndex + 1));
-  webviewWrapper.addEventListener('web-zoom-out', () => applyWebZoom(currentZoomIndex - 1));
+  webviewWrapper.addEventListener('web-zoom-in', () => applyWebZoom(liveZoomIndex() + 1));
+  webviewWrapper.addEventListener('web-zoom-out', () => applyWebZoom(liveZoomIndex() - 1));
   webviewWrapper.addEventListener('web-zoom-reset', () => applyWebZoom(findWebZoomLevelIndex(0)));
 
   // ── Bookmark overlay ────────────────────────────
@@ -612,6 +658,12 @@ function renderWebPanel(panel, container) {
       retryInProgress = false;
       console.log(`[WebPanel] loadURL failed (navigate) panel=${panel.id} url=${url} error=${err.message}`);
       showErrorPage(url, err.message, -2);
+    }, () => {
+      // Navigation aborted (e.g. beforeunload cancelled it). Release the guard
+      // so the panel isn't permanently locked out of navigating.
+      navigateInFlight = false;
+      retryInProgress = false;
+      console.log(`[WebPanel] loadURL aborted (navigate) panel=${panel.id} url=${url}`);
     });
     urlInput.value = url;
     updatePanelUrl(panel.id, url);
@@ -693,6 +745,12 @@ function renderWebPanel(panel, container) {
     if (window.electronAPI.cdpRegisterWebview) {
       window.electronAPI.cdpRegisterWebview(webview._webContentsId, panel.id, panel.url || '');
     }
+    // Re-apply zoom from live persisted state. dom-ready fires again after a
+    // reorder recreates the guest WebContents (DOM move of a <webview> tears
+    // down and rebuilds the guest), and the new guest defaults back to zoom 0.
+    // Re-derive from live state so the panel keeps its zoom after being moved,
+    // and keep the closure index in sync for subsequent relative steps.
+    currentZoomIndex = liveZoomIndex();
     try { webview.setZoomLevel(WEB_ZOOM_LEVELS[currentZoomIndex]); } catch (e) {}
   });
 
@@ -876,5 +934,9 @@ function renderWebPanel(panel, container) {
     destroyPanelSearch(panel.id);
     activeWebPanels.delete(panel.id);
   };
-  activeWebPanels.set(panel.id, { cleanup });
+  // reapplyZoom re-pushes the panel's persisted zoom onto the (possibly
+  // recreated) guest. Called after a reorder DOM move — see onDragEnd in
+  // panel-drag.js, mirroring how terminals re-fit after being moved.
+  const reapplyZoom = () => applyWebZoom(liveZoomIndex());
+  activeWebPanels.set(panel.id, { cleanup, reapplyZoom });
 }

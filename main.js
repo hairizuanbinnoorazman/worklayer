@@ -1392,6 +1392,29 @@ app.whenReady().then(async () => {
           return;
         }
 
+        // Intercept Cmd+= / Cmd+- / Cmd+0 zoom. Keystrokes typed while a webview
+        // guest is focused do NOT bubble to the host document, so the renderer's
+        // global zoom keydown handler never sees them — instead Electron's native
+        // menu zoom accelerators (role: zoomIn/zoomOut/resetZoom) fire against
+        // whichever guest Chromium considers focused, bypassing the panel's own
+        // persisted zoom. Forward to the host by webContentsId (same pattern as
+        // Cmd+R/Cmd+F); preventDefault also suppresses the menu accelerator so it
+        // doesn't double-apply.
+        if (input.meta || input.control) {
+          const isZoomIn = (input.key === '=' || input.key === '+');
+          const isZoomOut = (input.key === '-' || input.key === '_');
+          const isZoomReset = (input.key === '0');
+          if (isZoomIn || isZoomOut || isZoomReset) {
+            event.preventDefault();
+            const host = contents.hostWebContents;
+            if (host && !host.isDestroyed()) {
+              const direction = isZoomIn ? 'in' : isZoomOut ? 'out' : 'reset';
+              host.send('webview:zoom', { webContentsId: wcId, direction });
+            }
+            return;
+          }
+        }
+
         if (!capturingWebContents.has(wcId)) return;
         // Allow system shortcuts through
         if ((input.meta || input.control) && ['c', 'v', 'a', 'x', 'z'].includes(input.key.toLowerCase())) return;
@@ -1414,6 +1437,45 @@ app.whenReady().then(async () => {
         const host = contents.hostWebContents;
         if (host && !host.isDestroyed()) {
           host.send('search:foundInPage', { webContentsId: contents.id, result });
+        }
+      });
+
+      // A page with a beforeunload handler (common on pages with edit fields)
+      // fires will-prevent-unload when we try to navigate away. Electron's
+      // DEFAULT is to CANCEL the navigation, so without this listener the panel
+      // silently refuses to navigate and looks frozen until the page happens to
+      // drop its handler. Prompt the user (Chrome-style) and let them proceed.
+      contents.on('will-prevent-unload', (event) => {
+        const parent = BrowserWindow.fromWebContents(contents.hostWebContents) ||
+          BrowserWindow.getAllWindows()[0] || null;
+        const opts = {
+          type: 'question',
+          buttons: ['Leave', 'Stay'],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'Leave page?',
+          message: 'Leave this page?',
+          detail: 'Changes you made may not be saved.',
+        };
+        const choice = parent
+          ? dialog.showMessageBoxSync(parent, opts)
+          : dialog.showMessageBoxSync(opts);
+        if (choice === 0) {
+          // preventDefault() overrides the cancellation and lets the navigation proceed.
+          event.preventDefault();
+        }
+      });
+
+      // Report guest focus to the host so it can keep focusedPanelId in sync.
+      // The host-side <webview> 'focus' DOM event is unreliable for guest->guest
+      // focus transitions (clicking from one web panel's content into another's),
+      // which left focusedPanelId stuck on the first panel and routed keyboard
+      // zoom to the wrong panel. The main-process webContents 'focus' event is
+      // reliable across the process boundary.
+      contents.on('focus', () => {
+        const host = contents.hostWebContents;
+        if (host && !host.isDestroyed()) {
+          host.send('webview:focus', { webContentsId: contents.id });
         }
       });
 

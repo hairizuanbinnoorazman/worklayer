@@ -578,6 +578,16 @@ function updatePanelUrl(panelId, url) {
   if (panel) { panel.url = url; saveState(); }
 }
 
+// Resolve a panel from the live active-group state by id. Always use this
+// before applying zoom (or any state-derived mutation) so we act on the
+// panel's current state — panels can be rearranged and any index/value
+// captured at render time may be stale.
+function getActivePanelById(panelId) {
+  const group = getActiveGroup();
+  if (!group) return null;
+  return group.panels.find(p => p.id === panelId) || null;
+}
+
 function updatePanelFontSize(panelId, fontSize) {
   const group = getActiveGroup();
   if (!group) return;

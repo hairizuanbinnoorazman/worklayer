@@ -199,6 +199,17 @@ function renderFilePanel(panel, container) {
   }
   updateZoomUI();
 
+  // Re-derive the panel's current font index from live state. The panel may
+  // have been rearranged or re-rendered since this closure was created, so the
+  // cached `currentFontIndex` can be stale — read the persisted fontSize fresh.
+  function liveFontIndex() {
+    const livePanel = getActivePanelById(panel.id) || panel;
+    const size = livePanel.fontSize !== undefined
+      ? livePanel.fontSize
+      : getProfileDefaultFileFontSize(getActiveProfile());
+    return findFileFontSizeIndex(size);
+  }
+
   function applyZoom(newIndex) {
     currentFontIndex = Math.max(0, Math.min(FILE_FONT_SIZES.length - 1, newIndex));
     const fontSize = FILE_FONT_SIZES[currentFontIndex];
@@ -209,8 +220,8 @@ function renderFilePanel(panel, container) {
     updatePanelFontSize(panel.id, fontSize);
   }
 
-  zoomInBtn.addEventListener('click', () => applyZoom(currentFontIndex + 1));
-  zoomOutBtn.addEventListener('click', () => applyZoom(currentFontIndex - 1));
+  zoomInBtn.addEventListener('click', () => applyZoom(liveFontIndex() + 1));
+  zoomOutBtn.addEventListener('click', () => applyZoom(liveFontIndex() - 1));
   zoomLabel.addEventListener('dblclick', () => applyZoom(findFileFontSizeIndex(13)));
 
   const saveBtn = document.createElement('button');
@@ -230,8 +241,8 @@ function renderFilePanel(panel, container) {
   toolbar.appendChild(lspBtn);
   editorArea.appendChild(toolbar);
 
-  editorArea.addEventListener('file-zoom-in', () => applyZoom(currentFontIndex + 1));
-  editorArea.addEventListener('file-zoom-out', () => applyZoom(currentFontIndex - 1));
+  editorArea.addEventListener('file-zoom-in', () => applyZoom(liveFontIndex() + 1));
+  editorArea.addEventListener('file-zoom-out', () => applyZoom(liveFontIndex() - 1));
   editorArea.addEventListener('file-zoom-reset', () => applyZoom(findFileFontSizeIndex(13)));
 
   const tabBar = document.createElement('div');
