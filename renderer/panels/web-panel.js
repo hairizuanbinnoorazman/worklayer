@@ -611,6 +611,10 @@ function renderWebPanel(panel, container) {
     if (window.electronAPI.cdpRegisterWebview) {
       window.electronAPI.cdpRegisterWebview(webview._webContentsId, panel.id, panel.url || '');
     }
+    const searchEntry = activePanelSearches.get(panel.id);
+    if (searchEntry && !searchEntry.bar.hidden && !searchEntry.dismissing && searchEntry.searchImpl.startCapture) {
+      searchEntry.searchImpl.startCapture();
+    }
     try { webview.setZoomLevel(WEB_ZOOM_LEVELS[currentZoomIndex]); } catch (e) {}
   });
 
@@ -620,8 +624,13 @@ function renderWebPanel(panel, container) {
       'requestId:', e.result.requestId, 'active:', e.result.activeMatchOrdinal,
       'matches:', e.result.matches, 'final:', e.result.finalUpdate);
     const entry = activePanelSearches.get(panel.id);
-    if (entry && entry.updateMatchInfo) {
-      entry.updateMatchInfo(e.result.activeMatchOrdinal || 0, e.result.matches || 0);
+    if (entry && !entry.bar.hidden && !entry.dismissing) {
+      if (entry.updateMatchInfo) {
+        entry.updateMatchInfo(e.result.activeMatchOrdinal || 0, e.result.matches || 0);
+      }
+      if (entry.onFindResult) {
+        entry.onFindResult(e.result.finalUpdate);
+      }
     }
   });
 
@@ -721,14 +730,21 @@ function renderWebPanel(panel, container) {
     }
   });
 
-  // Focus tracking when webview gains focus; stop search capture so keystrokes go to webview
-  // BUT keep capture alive if the search bar is currently visible/active
+  // Focus tracking when webview gains focus.
+  // Only reclaim focus for the search input when findInPage() itself just stole focus;
+  // otherwise the user clicked/focused the webview, so stop search and let them interact.
   webview.addEventListener('focus', () => {
     setFocusedPanel(panel.id);
     const entry = activePanelSearches.get(panel.id);
     if (entry && !entry.bar.hidden) {
-      console.log('[WebPanel] focus event — search bar active, refocusing search input');
-      entry.input.focus(); // Immediately reclaim focus for the search input
+      if (!entry.dismissing && entry.isFindInProgress && entry.isFindInProgress()) {
+        console.log('[WebPanel] focus event — findInPage in progress, refocusing search input');
+        entry.reclaimedFocusAt = Date.now();
+        entry.input.focus();
+        return;
+      }
+      console.log('[WebPanel] focus event — user interacted with webview, dismissing search');
+      dismissFromWebviewFocus(panel.id);
       return;
     }
     if (entry && entry.searchImpl.stopCapture) {

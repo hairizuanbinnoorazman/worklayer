@@ -22,6 +22,8 @@ const lspManager = require('./lsp-manager');
 
 // Track which webContents are in search keystroke capture mode
 const capturingWebContents = new Set();
+// Track webContents whose search dismissal began on pointer down and awaits pointer up
+const dismissingWebContents = new Set();
 
 // HTTP Basic Auth request tracking
 let authRequestIdCounter = 0;
@@ -529,6 +531,7 @@ ipcMain.handle('lsp:sendNotification', (_, { serverId, method, params }) => {
 // Search keystroke capture IPC
 ipcMain.on('search:startCapture', (e, { webContentsId }) => {
   capturingWebContents.add(webContentsId);
+  dismissingWebContents.delete(webContentsId);
   debugLog('[Search] startCapture wcId:', webContentsId);
 });
 
@@ -1386,6 +1389,30 @@ app.whenReady().then(async () => {
         }
       });
 
+      contents.on('input-event', (event, inputEvent) => {
+        const type = (inputEvent && inputEvent.type || '').toLowerCase();
+        const wcId = contents.id;
+        if (type === 'mousedown' || type === 'touchstart' || type === 'pointerdown') {
+          if (capturingWebContents.has(wcId)) {
+            capturingWebContents.delete(wcId);
+            dismissingWebContents.add(wcId);
+            debugLog('[Search] webview pointer down, stopping capture wcId:', wcId, 'type:', inputEvent.type);
+            const host = contents.hostWebContents;
+            if (host && !host.isDestroyed()) {
+              host.send('search:webviewInteract', { webContentsId: wcId, phase: 'down' });
+            }
+          }
+        } else if (type === 'mouseup' || type === 'touchend' || type === 'touchcancel' || type === 'pointerup') {
+          if (dismissingWebContents.delete(wcId)) {
+            debugLog('[Search] webview pointer up, completing dismiss wcId:', wcId, 'type:', inputEvent.type);
+            const host = contents.hostWebContents;
+            if (host && !host.isDestroyed()) {
+              host.send('search:webviewInteract', { webContentsId: wcId, phase: 'up' });
+            }
+          }
+        }
+      });
+
       contents.on('found-in-page', (event, result) => {
         debugLog('[Search] found-in-page wcId:', contents.id, 'requestId:', result.requestId,
           'active:', result.activeMatchOrdinal, 'matches:', result.matches, 'final:', result.finalUpdate);
@@ -1431,6 +1458,12 @@ app.whenReady().then(async () => {
       });
 
       contents.on('context-menu', (event, params) => {
+        if (capturingWebContents.delete(contents.id) || dismissingWebContents.delete(contents.id)) {
+          const host = contents.hostWebContents;
+          if (host && !host.isDestroyed()) {
+            host.send('search:webviewInteract', { webContentsId: contents.id, phase: 'up' });
+          }
+        }
         const menuTemplate = [];
 
         if (params.linkURL) {
@@ -1506,6 +1539,8 @@ app.whenReady().then(async () => {
       });
 
       contents.once('destroyed', () => {
+        capturingWebContents.delete(contents.id);
+        dismissingWebContents.delete(contents.id);
         attachedDebuggers.delete(contents.id);
         webviewPanelMap.delete(contents.id);
         networkRequests.delete(contents.id);
