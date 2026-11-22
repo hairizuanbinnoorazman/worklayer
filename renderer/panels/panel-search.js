@@ -9,7 +9,7 @@ if (window.electronAPI && window.electronAPI.onSearchKeystroke) {
     let matched = false;
     for (const [panelId, entry] of activePanelSearches) {
       if (!entry.searchImpl.webContentsId || entry.searchImpl.webContentsId !== data.webContentsId) continue;
-      if (entry.bar.hidden) continue;
+      if (entry.bar.hidden || entry.dismissing) continue;
       matched = true;
 
       const inp = entry.input;
@@ -58,17 +58,75 @@ if (window.electronAPI && window.electronAPI.onSearchFoundInPage) {
   window.electronAPI.onSearchFoundInPage(data => {
     for (const [panelId, entry] of activePanelSearches) {
       if (!entry.searchImpl.webContentsId || entry.searchImpl.webContentsId !== data.webContentsId) continue;
-      if (entry.bar.hidden) continue;
+      if (entry.bar.hidden || entry.dismissing) continue;
       console.log('[PanelSearch] found-in-page via IPC wcId:', data.webContentsId,
         'requestId:', data.result.requestId, 'active:', data.result.activeMatchOrdinal,
         'matches:', data.result.matches, 'final:', data.result.finalUpdate);
       if (entry.updateMatchInfo) {
         entry.updateMatchInfo(data.result.activeMatchOrdinal || 0, data.result.matches || 0);
       }
+      if (entry.onFindResult) {
+        entry.onFindResult(data.result.finalUpdate);
+      }
       break;
     }
   });
 }
+
+if (window.electronAPI && window.electronAPI.onSearchWebviewInteract) {
+  window.electronAPI.onSearchWebviewInteract(data => {
+    for (const [panelId, entry] of activePanelSearches) {
+      if (!entry.searchImpl.webContentsId || entry.searchImpl.webContentsId !== data.webContentsId) continue;
+      if (entry.bar.hidden) continue;
+
+      if (data.phase === 'down') {
+        const justReclaimed = entry.reclaimedFocusAt && (Date.now() - entry.reclaimedFocusAt < 100);
+        beginDismissPanelSearch(panelId, { keepSelection: true, deferUntilMouseUp: true });
+        if (justReclaimed && entry.searchImpl.focusWebview) {
+          entry.searchImpl.focusWebview();
+        }
+      } else if (data.phase === 'up') {
+        if (!entry.dismissing) {
+          beginDismissPanelSearch(panelId, { keepSelection: true, deferUntilMouseUp: true });
+        }
+        scheduleHideAfterMouseUp(panelId);
+      }
+      break;
+    }
+  });
+}
+
+// Dismiss open panel search bars when clicking anywhere outside the search bar
+document.addEventListener('mousedown', e => {
+  for (const [panelId, entry] of activePanelSearches) {
+    if (entry.bar.hidden) continue;
+    if (entry.bar.contains(e.target)) continue;
+
+    const content = entry.bar.parentElement;
+    const clickedInsidePanelContent = content ? content.contains(e.target) : false;
+    if (clickedInsidePanelContent) {
+      // Defer hiding until mouseup so controls below the search bar don't shift before click
+      beginDismissPanelSearch(panelId, { keepSelection: false, deferUntilMouseUp: true });
+    } else {
+      // Clicking outside panel-content (header, sidebar, other panels) cannot shift the target
+      hidePanelSearch(panelId, { keepSelection: false });
+    }
+  }
+}, true);
+
+window.addEventListener('mouseup', () => {
+  for (const [panelId, entry] of activePanelSearches) {
+    if (entry.bar.hidden || !entry.dismissing) continue;
+    scheduleHideAfterMouseUp(panelId);
+  }
+}, true);
+
+window.addEventListener('blur', () => {
+  for (const [panelId, entry] of activePanelSearches) {
+    if (entry.bar.hidden || !entry.dismissing) continue;
+    hidePanelSearch(panelId, { keepSelection: entry.dismissKeepSelection });
+  }
+});
 
 function createSearchBar(panelId, searchImpl) {
   const bar = document.createElement('div');
@@ -107,6 +165,65 @@ function createSearchBar(panelId, searchImpl) {
 
   let currentQuery = '';
   let debounceTimer = null;
+  let refocusTimer = null;
+  let findSettleTimer = null;
+  let findInProgress = false;
+
+  const entry = {
+    bar,
+    input,
+    searchImpl,
+    dismissing: false,
+    dismissKeepSelection: false,
+    reclaimedFocusAt: 0,
+    hideTimer: null,
+    webviewFocusDismissTimer: null,
+    updateMatchInfo,
+    onFindResult,
+    isFindInProgress: () => findInProgress,
+    clearFindInProgress,
+    cancelPendingTimers,
+  };
+
+  function markFindInProgress() {
+    findInProgress = true;
+    clearTimeout(findSettleTimer);
+    findSettleTimer = setTimeout(() => {
+      findInProgress = false;
+      findSettleTimer = null;
+    }, 500);
+  }
+
+  function clearFindInProgress() {
+    findInProgress = false;
+    clearTimeout(findSettleTimer);
+    findSettleTimer = null;
+  }
+
+  function onFindResult(finalUpdate) {
+    if (!finalUpdate || bar.hidden || entry.dismissing) return;
+    clearTimeout(findSettleTimer);
+    findSettleTimer = setTimeout(() => {
+      findInProgress = false;
+      findSettleTimer = null;
+    }, 150);
+    if (document.activeElement !== input) {
+      input.focus();
+    }
+  }
+
+  function cancelPendingTimers() {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+    clearTimeout(refocusTimer);
+    refocusTimer = null;
+    clearTimeout(findSettleTimer);
+    findSettleTimer = null;
+    clearTimeout(entry.hideTimer);
+    entry.hideTimer = null;
+    clearTimeout(entry.webviewFocusDismissTimer);
+    entry.webviewFocusDismissTimer = null;
+  }
 
   function updateMatchInfo(activeIndex, total) {
     if (total > 0) {
@@ -119,15 +236,18 @@ function createSearchBar(panelId, searchImpl) {
   }
 
   function doFind(direction) {
+    if (bar.hidden || entry.dismissing) return;
     const query = input.value;
     console.log('[PanelSearch] doFind direction:', direction, 'query:', query);
     if (!query) {
+      clearFindInProgress();
       searchImpl.clear();
       currentQuery = '';
       updateMatchInfo(0, 0);
       return;
     }
     currentQuery = query;
+    markFindInProgress();
     if (direction === 'prev') {
       searchImpl.findPrevious(query);
     } else {
@@ -145,15 +265,21 @@ function createSearchBar(panelId, searchImpl) {
     const query = input.value;
     if (!query) return;
     if (direction === 'prev' && searchImpl.navigatePrevious) {
+      markFindInProgress();
       searchImpl.navigatePrevious(query);
     } else if (searchImpl.navigateNext) {
+      markFindInProgress();
       searchImpl.navigateNext(query);
     } else {
       doFind(direction);
-      return; // doFind already handles focus restore
+      return;
     }
     // Backup: re-focus search input after findInPage to counteract webview focus steal
-    setTimeout(() => { if (!bar.hidden) input.focus(); }, 100);
+    clearTimeout(refocusTimer);
+    refocusTimer = setTimeout(() => {
+      refocusTimer = null;
+      if (!bar.hidden && !entry.dismissing) input.focus();
+    }, 100);
   }
 
   input.addEventListener('input', () => scheduleSearch());
@@ -170,14 +296,16 @@ function createSearchBar(panelId, searchImpl) {
   input.addEventListener('mousedown', e => e.stopPropagation());
   // Re-enable keystroke capture when search input regains focus
   input.addEventListener('focus', () => {
-    if (searchImpl.startCapture) searchImpl.startCapture();
+    if (!bar.hidden && !entry.dismissing && searchImpl.startCapture) {
+      searchImpl.startCapture();
+    }
   });
 
   prevBtn.addEventListener('click', () => navigateSearch('prev'));
   nextBtn.addEventListener('click', () => navigateSearch('next'));
   closeBtn.addEventListener('click', () => hidePanelSearch(panelId));
 
-  return { bar, input, searchImpl, updateMatchInfo };
+  return entry;
 }
 
 function getSearchImpl(panelId) {
@@ -191,11 +319,12 @@ function getSearchImpl(panelId) {
     const webview = panelEl ? panelEl.querySelector('webview') : null;
     if (!webview) return null;
 
-    const wcId = webview._webContentsId;
     let lastQuery = '';
 
     return {
-      webContentsId: wcId,
+      get webContentsId() {
+        return webview._webContentsId;
+      },
       findNext(query) {
         const isNew = query !== lastQuery;
         lastQuery = query;
@@ -223,14 +352,20 @@ function getSearchImpl(panelId) {
       navigatePrevious(query) {
         webview.findInPage(query, { forward: false, findNext: true });
       },
-      clear() {
+      clear(options = {}) {
         lastQuery = '';
-        webview.stopFindInPage('clearSelection');
+        const action = options.keepSelection ? 'keepSelection' : 'clearSelection';
+        try { webview.stopFindInPage(action); } catch (e) {}
+      },
+      focusWebview() {
+        try { webview.focus(); } catch (e) {}
       },
       startCapture() {
+        const wcId = webview._webContentsId;
         if (wcId) window.electronAPI.searchStartCapture(wcId);
       },
       stopCapture() {
+        const wcId = webview._webContentsId;
         if (wcId) window.electronAPI.searchStopCapture(wcId);
       },
     };
@@ -250,9 +385,55 @@ function getSearchImpl(panelId) {
   return null;
 }
 
+function beginDismissPanelSearch(panelId, { keepSelection = false, deferUntilMouseUp = true } = {}) {
+  const entry = activePanelSearches.get(panelId);
+  if (!entry || entry.bar.hidden) return;
+  entry.dismissing = true;
+  entry.dismissKeepSelection = entry.dismissKeepSelection || keepSelection;
+  entry.cancelPendingTimers();
+  entry.clearFindInProgress();
+  if (entry.searchImpl.stopCapture) entry.searchImpl.stopCapture();
+  if (!deferUntilMouseUp) {
+    hidePanelSearch(panelId, { keepSelection: entry.dismissKeepSelection });
+  }
+}
+
+function scheduleHideAfterMouseUp(panelId) {
+  const entry = activePanelSearches.get(panelId);
+  if (!entry || entry.bar.hidden || !entry.dismissing) return;
+  clearTimeout(entry.hideTimer);
+  entry.hideTimer = setTimeout(() => {
+    entry.hideTimer = null;
+    if (entry.dismissing && !entry.bar.hidden) {
+      hidePanelSearch(panelId, { keepSelection: entry.dismissKeepSelection });
+    }
+  }, 0);
+}
+
+function dismissFromWebviewFocus(panelId) {
+  const entry = activePanelSearches.get(panelId);
+  if (!entry || entry.bar.hidden) return;
+  if (entry.dismissing) return;
+  beginDismissPanelSearch(panelId, { keepSelection: true, deferUntilMouseUp: true });
+  // Fallback in case focus moved via keyboard (e.g. Tab) without a pointer down/up pair.
+  // If search:webviewInteract phase:'down' arrives, beginDismissPanelSearch cancels this timer
+  // so the bar waits cleanly for pointer up.
+  entry.webviewFocusDismissTimer = setTimeout(() => {
+    entry.webviewFocusDismissTimer = null;
+    if (entry.dismissing && !entry.bar.hidden) {
+      hidePanelSearch(panelId, { keepSelection: true });
+    }
+  }, 200);
+}
+
 function showPanelSearch(panelId) {
   const existing = activePanelSearches.get(panelId);
   if (existing) {
+    existing.cancelPendingTimers();
+    existing.clearFindInProgress();
+    existing.dismissing = false;
+    existing.dismissKeepSelection = false;
+    existing.reclaimedFocusAt = 0;
     existing.bar.hidden = false;
     existing.input.focus();
     existing.input.select();
@@ -263,30 +444,42 @@ function showPanelSearch(panelId) {
   const searchImpl = getSearchImpl(panelId);
   if (!searchImpl) return;
 
-  const { bar, input, updateMatchInfo } = createSearchBar(panelId, searchImpl);
+  const entry = createSearchBar(panelId, searchImpl);
 
   const panelEl = document.querySelector(`[data-panel-id="${panelId}"]`);
   if (!panelEl) return;
   const content = panelEl.querySelector('.panel-content');
   if (!content) return;
-  content.insertBefore(bar, content.firstChild);
+  content.insertBefore(entry.bar, content.firstChild);
 
-  activePanelSearches.set(panelId, { bar, input, searchImpl, updateMatchInfo });
+  activePanelSearches.set(panelId, entry);
   if (searchImpl.startCapture) searchImpl.startCapture();
-  input.focus();
+  entry.input.focus();
 }
 
-function hidePanelSearch(panelId) {
+function hidePanelSearch(panelId, options = {}) {
   const entry = activePanelSearches.get(panelId);
   if (!entry) return;
+  entry.cancelPendingTimers();
+  entry.clearFindInProgress();
+  entry.dismissing = false;
+  entry.dismissKeepSelection = false;
+  entry.reclaimedFocusAt = 0;
+  if (entry.bar.hidden) {
+    if (entry.searchImpl.stopCapture) entry.searchImpl.stopCapture();
+    return;
+  }
   entry.bar.hidden = true;
-  entry.searchImpl.clear();
+  entry.searchImpl.clear(options);
   if (entry.searchImpl.stopCapture) entry.searchImpl.stopCapture();
 }
 
 function destroyPanelSearch(panelId) {
   const entry = activePanelSearches.get(panelId);
   if (!entry) return;
+  entry.cancelPendingTimers();
+  entry.clearFindInProgress();
+  entry.dismissing = false;
   try { entry.searchImpl.clear(); } catch (e) {}
   if (entry.searchImpl.stopCapture) entry.searchImpl.stopCapture();
   entry.bar.remove();
