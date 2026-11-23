@@ -143,7 +143,7 @@ async function mountTerminal(panel, container, fontSize) {
     cwd: panel.cwd || undefined,
     initialCommand: panel.initialCommand || undefined,
     profileId: getActiveProfile()?.id,
-    groupId: getActiveGroupId(),
+    groupId: findGroupByPanelId(panel.id)?.id || getActiveGroupId(),
     interceptPdf: getProfileInterceptPdf(getActiveProfile()),
   });
 

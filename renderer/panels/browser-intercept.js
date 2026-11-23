@@ -13,10 +13,11 @@
       }
     }
 
+    const resolvedGroupId = (panelId && findGroupByPanelId(panelId)?.id) || groupId;
     if (panelId) {
-      addWebPanelAfter(panelId, url, groupId);
+      addWebPanelAfter(panelId, url, resolvedGroupId);
     } else {
-      addWebPanelAtEnd(url, groupId);
+      addWebPanelAtEnd(url, resolvedGroupId);
     }
   });
 
@@ -32,9 +33,10 @@
           }
         }
       }
+      const resolvedGroupId = (sourcePanelId && findGroupByPanelId(sourcePanelId)?.id) || groupId;
       const newPanelId = sourcePanelId
-        ? addWebPanelAfter(sourcePanelId, url, groupId)
-        : addWebPanelAtEnd(url, groupId);
+        ? addWebPanelAfter(sourcePanelId, url, resolvedGroupId)
+        : addWebPanelAtEnd(url, resolvedGroupId);
       window.electronAPI.panelCreateResponse(requestId, newPanelId, null);
     } catch (e) {
       window.electronAPI.panelCreateResponse(requestId, null, e.message);

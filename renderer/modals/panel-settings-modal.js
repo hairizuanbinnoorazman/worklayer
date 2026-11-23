@@ -108,6 +108,31 @@ function showPanelSettingsModal(panel) {
     fieldsSection.appendChild(dirField);
   }
 
+  // Workspace selector (allows moving panel to another workspace)
+  const profile = getActiveProfile();
+  const currentGroup = findGroupByPanelId(panel.id);
+  if (profile && profile.groups.length > 0 && currentGroup) {
+    const wsLabel = document.createElement('label');
+    wsLabel.className = 'modal-label';
+    wsLabel.textContent = 'Workspace';
+    fieldsSection.appendChild(wsLabel);
+
+    newSettings.groupId = currentGroup.id;
+    const wsSelect = document.createElement('select');
+    wsSelect.className = 'modal-select';
+    profile.groups.forEach(group => {
+      const opt = document.createElement('option');
+      opt.value = group.id;
+      opt.textContent = group.label;
+      if (group.id === currentGroup.id) opt.selected = true;
+      wsSelect.appendChild(opt);
+    });
+    wsSelect.addEventListener('change', () => {
+      newSettings.groupId = wsSelect.value;
+    });
+    fieldsSection.appendChild(wsSelect);
+  }
+
   container.appendChild(fieldsSection);
 
   // Footer

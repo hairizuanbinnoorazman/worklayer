@@ -23,6 +23,37 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+function createAddPanelControls() {
+  const addControls = document.createElement('div');
+  addControls.className = 'add-panel-controls';
+
+  const webBtn = document.createElement('button');
+  webBtn.className = 'add-panel-btn';
+  webBtn.textContent = '+ Web';
+  webBtn.addEventListener('click', () => addPanel('web'));
+
+  const termBtn = document.createElement('button');
+  termBtn.className = 'add-panel-btn';
+  termBtn.textContent = '+ Terminal';
+  termBtn.addEventListener('click', () => addPanel('terminal'));
+
+  const fileBtn = document.createElement('button');
+  fileBtn.className = 'add-panel-btn';
+  fileBtn.textContent = '+ Files';
+  fileBtn.addEventListener('click', () => addPanel('file'));
+
+  const debugBtn = document.createElement('button');
+  debugBtn.className = 'add-panel-btn';
+  debugBtn.textContent = '+ Debug';
+  debugBtn.addEventListener('click', () => addPanel('debug'));
+
+  addControls.appendChild(webBtn);
+  addControls.appendChild(termBtn);
+  addControls.appendChild(fileBtn);
+  addControls.appendChild(debugBtn);
+  return addControls;
+}
+
 function renderPanelStrip(scrollToEnd = true) {
   const strip = document.getElementById('panel-strip');
   const group = getActiveGroup();
@@ -39,7 +70,10 @@ function renderPanelStrip(scrollToEnd = true) {
     console.log(`[PanelStrip] Cache HIT - reusing DOM for group=${group.id}`);
     cached.hidden = false;
     touchLRU(group.id);
-    requestAnimationFrame(() => fitVisibleTerminals(group.id));
+    requestAnimationFrame(() => {
+      fitVisibleTerminals(group.id);
+      layoutVisibleEditors(group.id);
+    });
     renderStatusBar();
     return;
   }
@@ -94,34 +128,7 @@ function renderPanelStrip(scrollToEnd = true) {
       wrapper.appendChild(createResizeHandle(panel.id));
     });
 
-    const addControls = document.createElement('div');
-    addControls.className = 'add-panel-controls';
-
-    const webBtn = document.createElement('button');
-    webBtn.className = 'add-panel-btn';
-    webBtn.textContent = '+ Web';
-    webBtn.addEventListener('click', () => addPanel('web'));
-
-    const termBtn = document.createElement('button');
-    termBtn.className = 'add-panel-btn';
-    termBtn.textContent = '+ Terminal';
-    termBtn.addEventListener('click', () => addPanel('terminal'));
-
-    const fileBtn = document.createElement('button');
-    fileBtn.className = 'add-panel-btn';
-    fileBtn.textContent = '+ Files';
-    fileBtn.addEventListener('click', () => addPanel('file'));
-
-    const debugBtn2 = document.createElement('button');
-    debugBtn2.className = 'add-panel-btn';
-    debugBtn2.textContent = '+ Debug';
-    debugBtn2.addEventListener('click', () => addPanel('debug'));
-
-    addControls.appendChild(webBtn);
-    addControls.appendChild(termBtn);
-    addControls.appendChild(fileBtn);
-    addControls.appendChild(debugBtn2);
-    wrapper.appendChild(addControls);
+    wrapper.appendChild(createAddPanelControls());
   }
 
   strip.appendChild(wrapper);
@@ -150,6 +157,15 @@ function createPanelElement(panel) {
   typeLabel.className = 'panel-type-label';
   typeLabel.textContent = panel.type === 'web' ? 'Web' : panel.type === 'file' ? 'Files' : panel.type === 'debug' ? 'Debug' : 'Terminal';
 
+  const moveBtn = document.createElement('button');
+  moveBtn.className = 'panel-move-btn';
+  moveBtn.textContent = '\u21c4';
+  moveBtn.title = 'Move to another workspace';
+  moveBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    showPanelMoveMenu(panel.id, moveBtn);
+  });
+
   const settingsBtn = document.createElement('button');
   settingsBtn.className = 'panel-settings-btn';
   settingsBtn.textContent = '\u2699';
@@ -165,6 +181,7 @@ function createPanelElement(panel) {
   closeBtn.addEventListener('click', () => removePanel(panel.id));
 
   header.appendChild(typeLabel);
+  header.appendChild(moveBtn);
   header.appendChild(settingsBtn);
   header.appendChild(closeBtn);
   el.appendChild(header);
@@ -186,13 +203,162 @@ function createPanelElement(panel) {
 
   // Focus tracking: clicking a panel focuses it
   el.addEventListener('mousedown', e => {
-    // Don't steal focus when clicking close button
-    if (e.target.closest('.panel-close-btn') || e.target.closest('.panel-settings-btn')) return;
+    // Don't steal focus when clicking header action buttons
+    if (e.target.closest('.panel-close-btn') || e.target.closest('.panel-settings-btn') || e.target.closest('.panel-move-btn')) return;
     setFocusedPanel(panel.id);
   });
 
   initPanelDrag(el);
   return el;
+}
+
+// ── Panel move-to-workspace menu ──────────────────
+let activePanelMoveMenu = null;
+
+function closePanelMoveMenu() {
+  if (!activePanelMoveMenu) return;
+  document.removeEventListener('keydown', activePanelMoveMenu.onKeyDown, true);
+  activePanelMoveMenu.backdrop.remove();
+  activePanelMoveMenu.menu.remove();
+  activePanelMoveMenu = null;
+}
+
+function showPanelMoveMenu(panelId, anchorBtn) {
+  if (activePanelMoveMenu && activePanelMoveMenu.panelId === panelId) {
+    closePanelMoveMenu();
+    return;
+  }
+  closePanelMoveMenu();
+
+  const profile = getActiveProfile();
+  if (!profile) return;
+  const currentGroup = findGroupByPanelId(panelId);
+  if (!currentGroup) return;
+
+  const otherGroups = profile.groups.filter(g => g.id !== currentGroup.id);
+
+  // Transparent backdrop catches clicks anywhere outside, including over <webview>
+  const backdrop = document.createElement('div');
+  backdrop.className = 'panel-move-backdrop';
+  backdrop.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    closePanelMoveMenu();
+  });
+
+  const menu = document.createElement('div');
+  menu.className = 'panel-move-menu';
+
+  const menuHeader = document.createElement('div');
+  menuHeader.className = 'panel-move-menu-header';
+  menuHeader.textContent = 'Move to workspace';
+  menu.appendChild(menuHeader);
+
+  const list = document.createElement('div');
+  list.className = 'panel-move-list';
+
+  if (otherGroups.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'panel-move-empty';
+    empty.textContent = 'No other workspaces';
+    list.appendChild(empty);
+  } else {
+    otherGroups.forEach(group => {
+      const item = document.createElement('div');
+      item.className = 'panel-move-item';
+      item.dataset.targetGroupId = group.id;
+
+      const label = document.createElement('span');
+      label.className = 'panel-move-item-label';
+      label.textContent = group.label;
+
+      const count = document.createElement('span');
+      count.className = 'panel-move-item-count';
+      count.textContent = group.panels.length;
+
+      const switchBtn = document.createElement('button');
+      switchBtn.className = 'panel-move-switch-btn';
+      switchBtn.textContent = '\u2197';
+      switchBtn.title = 'Move and switch to workspace';
+      switchBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        closePanelMoveMenu();
+        movePanelToGroup(panelId, group.id, { switchToTarget: true });
+      });
+
+      item.appendChild(label);
+      item.appendChild(count);
+      item.appendChild(switchBtn);
+
+      item.addEventListener('click', e => {
+        e.stopPropagation();
+        closePanelMoveMenu();
+        movePanelToGroup(panelId, group.id, { switchToTarget: e.metaKey || e.ctrlKey });
+      });
+
+      list.appendChild(item);
+    });
+  }
+
+  menu.appendChild(list);
+
+  const divider = document.createElement('div');
+  divider.className = 'panel-move-divider';
+  menu.appendChild(divider);
+
+  const newItem = document.createElement('div');
+  newItem.className = 'panel-move-item panel-move-new';
+
+  const newLabel = document.createElement('span');
+  newLabel.className = 'panel-move-item-label';
+  newLabel.textContent = '+ New Workspace';
+
+  const newSwitchBtn = document.createElement('button');
+  newSwitchBtn.className = 'panel-move-switch-btn';
+  newSwitchBtn.textContent = '\u2197';
+  newSwitchBtn.title = 'Move to new workspace and switch';
+  newSwitchBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    closePanelMoveMenu();
+    movePanelToNewGroup(panelId, { switchToTarget: true });
+  });
+
+  newItem.appendChild(newLabel);
+  newItem.appendChild(newSwitchBtn);
+  newItem.addEventListener('click', e => {
+    e.stopPropagation();
+    closePanelMoveMenu();
+    movePanelToNewGroup(panelId, { switchToTarget: e.metaKey || e.ctrlKey });
+  });
+  menu.appendChild(newItem);
+
+  const onKeyDown = e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closePanelMoveMenu();
+    }
+  };
+  document.addEventListener('keydown', onKeyDown, true);
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(menu);
+
+  // Position menu anchored below anchorBtn, clamped within viewport
+  const btnRect = anchorBtn.getBoundingClientRect();
+  const menuRect = menu.getBoundingClientRect();
+  const margin = 8;
+  let left = btnRect.right - menuRect.width;
+  if (left < margin) left = margin;
+  if (left + menuRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - menuRect.width - margin;
+  }
+  let top = btnRect.bottom + 4;
+  if (top + menuRect.height > window.innerHeight - margin) {
+    top = Math.max(margin, btnRect.top - menuRect.height - 4);
+  }
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  activePanelMoveMenu = { panelId, backdrop, menu, onKeyDown };
 }
 
 function createResizeHandle(panelId) {

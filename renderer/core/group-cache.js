@@ -66,3 +66,17 @@ function fitVisibleTerminals(groupId) {
     }
   });
 }
+
+function layoutVisibleEditors(groupId) {
+  const profile = getActiveProfile();
+  const group = profile ? profile.groups.find(g => g.id === groupId) : null;
+  if (!group) return;
+  group.panels.forEach(p => {
+    if (p.type === 'file' && activeEditors.has(p.id)) {
+      const { editor } = activeEditors.get(p.id);
+      if (editor) {
+        try { editor.layout(); } catch (e) {}
+      }
+    }
+  });
+}
