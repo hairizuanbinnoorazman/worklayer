@@ -229,6 +229,18 @@ function getGroupById(groupId) {
   return profile.groups.find(g => g.id === groupId) || null;
 }
 
+function findGroupByPanelId(panelId) {
+  const profile = getActiveProfile();
+  if (!profile) return null;
+  return profile.groups.find(g => g.panels.some(p => p.id === panelId)) || null;
+}
+
+function findPanelById(panelId) {
+  const group = findGroupByPanelId(panelId);
+  if (!group) return null;
+  return group.panels.find(p => p.id === panelId) || null;
+}
+
 function resolveTargetGroup(targetGroupId) {
   if (targetGroupId) {
     const group = getGroupById(targetGroupId);
@@ -338,6 +350,7 @@ function renameGroup(groupId, newLabel) {
 function selectGroup(groupId) {
   const profile = getActiveProfile();
   if (!profile || profile.activeGroupId === groupId) return;
+  if (typeof closePanelMoveMenu === 'function') closePanelMoveMenu();
   setFocusedPanel(null);
   profile.activeGroupId = groupId;
   saveState();
@@ -522,7 +535,7 @@ function addWebPanelAtEnd(url, targetGroupId) {
 }
 
 function removePanel(panelId) {
-  const group = getActiveGroup();
+  const group = findGroupByPanelId(panelId);
   if (!group) return;
 
   destroyPanelSearch(panelId);
@@ -548,8 +561,8 @@ function removePanel(panelId) {
   group.panels = group.panels.filter(p => p.id !== panelId);
 
   // Surgically remove from cached DOM to avoid destroying existing terminals
-  const activeGId = getActiveGroupId();
-  const cached = getCachedContainer(activeGId);
+  const cached = getCachedContainer(group.id);
+  const isActiveGroup = group.id === getActiveGroupId();
   if (cached && group.panels.length > 0) {
     const panelEl = cached.querySelector(`[data-panel-id="${panelId}"]`);
     if (panelEl) {
@@ -562,45 +575,194 @@ function removePanel(panelId) {
     }
     renderStatusBar();
   } else {
-    // Group is empty or no cache — rebuild
-    removeCachedGroup(activeGId);
-    renderPanelStrip();
+    // Group is empty or no cache — rebuild if active
+    removeCachedGroup(group.id);
+    if (isActiveGroup) {
+      renderPanelStrip();
+    } else {
+      renderStatusBar();
+    }
   }
 
   renderSidebar();
   saveState();
 }
 
+function movePanelToGroup(panelId, targetGroupId, { switchToTarget = false } = {}) {
+  const profile = getActiveProfile();
+  if (!profile) return false;
+
+  const sourceGroup = findGroupByPanelId(panelId);
+  const targetGroup = profile.groups.find(g => g.id === targetGroupId);
+  if (!sourceGroup || !targetGroup || sourceGroup.id === targetGroup.id) return false;
+
+  const panelIndex = sourceGroup.panels.findIndex(p => p.id === panelId);
+  if (panelIndex === -1) return false;
+  const panel = sourceGroup.panels[panelIndex];
+
+  // Clean up transient UI state without destroying panel internals
+  hidePanelSearch(panelId);
+  if (focusedPanelId === panelId) setFocusedPanel(null);
+
+  // Move panel in state
+  sourceGroup.panels.splice(panelIndex, 1);
+  targetGroup.panels.push(panel);
+
+  // Move live DOM element and its resize handle to preserve running state
+  const sourceContainer = getCachedContainer(sourceGroup.id);
+  let targetContainer = getCachedContainer(targetGroup.id);
+  const panelEl = sourceContainer ? sourceContainer.querySelector(`[data-panel-id="${panelId}"]`) : null;
+  const resizeHandle = (panelEl && panelEl.nextElementSibling &&
+    panelEl.nextElementSibling.classList.contains('resize-handle'))
+    ? panelEl.nextElementSibling
+    : null;
+
+  if (panelEl) {
+    // Sync webview src attribute while detached so SPA/in-page URLs survive re-attachment
+    if (panel.type === 'web' && panel.url && !panel.url.startsWith('data:')) {
+      const webview = panelEl.querySelector('webview');
+      if (webview && webview.getAttribute('src') !== panel.url) {
+        panelEl.remove();
+        webview.setAttribute('src', panel.url);
+      }
+    }
+
+    const handleToInsert = resizeHandle || createResizeHandle(panel.id);
+
+    if (targetContainer) {
+      const addControls = targetContainer.querySelector('.add-panel-controls');
+      if (addControls) {
+        targetContainer.insertBefore(panelEl, addControls);
+        targetContainer.insertBefore(handleToInsert, addControls);
+      } else {
+        // Target container was showing empty state
+        targetContainer.innerHTML = '';
+        targetContainer.appendChild(panelEl);
+        targetContainer.appendChild(handleToInsert);
+        targetContainer.appendChild(createAddPanelControls());
+      }
+    } else {
+      // Target group isn't cached yet — materialize it and attach the live panelEl
+      const strip = document.getElementById('panel-strip');
+      const wrapper = document.createElement('div');
+      wrapper.className = 'group-container';
+      wrapper.dataset.groupId = targetGroup.id;
+      wrapper.hidden = true;
+
+      for (const p of targetGroup.panels) {
+        if (p.id === panel.id) continue;
+        wrapper.appendChild(createPanelElement(p));
+        wrapper.appendChild(createResizeHandle(p.id));
+      }
+      wrapper.appendChild(panelEl);
+      wrapper.appendChild(handleToInsert);
+      wrapper.appendChild(createAddPanelControls());
+
+      strip.appendChild(wrapper);
+      cacheContainer(targetGroup.id, wrapper);
+      targetContainer = wrapper;
+      touchLRU(targetGroup.id);
+      if (!switchToTarget && sourceGroup.id === getActiveGroupId()) {
+        touchLRU(sourceGroup.id);
+      }
+      evictLRU();
+    }
+  } else if (targetContainer) {
+    // Source wasn't cached, but target is cached — insert fresh DOM element into target
+    const newEl = createPanelElement(panel);
+    const newHandle = createResizeHandle(panel.id);
+    const addControls = targetContainer.querySelector('.add-panel-controls');
+    if (addControls) {
+      targetContainer.insertBefore(newEl, addControls);
+      targetContainer.insertBefore(newHandle, addControls);
+    } else {
+      targetContainer.innerHTML = '';
+      targetContainer.appendChild(newEl);
+      targetContainer.appendChild(newHandle);
+      targetContainer.appendChild(createAddPanelControls());
+    }
+  }
+
+  // If source group is now empty, drop its stale cache container
+  if (sourceGroup.panels.length === 0) {
+    removeCachedGroup(sourceGroup.id);
+    if (!switchToTarget && sourceGroup.id === getActiveGroupId()) {
+      renderPanelStrip();
+    }
+  }
+
+  if (switchToTarget) {
+    if (profile.activeGroupId !== targetGroup.id) {
+      selectGroup(targetGroup.id);
+    } else {
+      renderSidebar();
+      renderStatusBar();
+      saveState();
+    }
+    requestAnimationFrame(() => {
+      const container = getCachedContainer(targetGroup.id);
+      const movedEl = container ? container.querySelector(`[data-panel-id="${panelId}"]`) : null;
+      if (movedEl) {
+        movedEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest' });
+      }
+      setFocusedPanel(panelId);
+    });
+  } else {
+    renderSidebar();
+    renderStatusBar();
+    saveState();
+
+    // Flash target workspace in sidebar for visual confirmation
+    const targetItem = document.querySelector(`.group-item[data-group-id="${targetGroup.id}"]`);
+    if (targetItem) {
+      targetItem.classList.add('panel-received');
+      setTimeout(() => targetItem.classList.remove('panel-received'), 700);
+    }
+  }
+
+  return true;
+}
+
+function movePanelToNewGroup(panelId, { switchToTarget = false } = {}) {
+  const profile = getActiveProfile();
+  if (!profile) return null;
+  const sourceGroup = findGroupByPanelId(panelId);
+  if (!sourceGroup) return null;
+
+  const newGroupId = generateId();
+  const label = `Work ${profile.groups.length + 1}`;
+  profile.groups.push({ id: newGroupId, label, panels: [], lspServers: [] });
+
+  const moved = movePanelToGroup(panelId, newGroupId, { switchToTarget });
+  if (!moved) {
+    profile.groups = profile.groups.filter(g => g.id !== newGroupId);
+    return null;
+  }
+  return newGroupId;
+}
+
 function updatePanelUrl(panelId, url) {
-  const group = getActiveGroup();
-  if (!group) return;
-  const panel = group.panels.find(p => p.id === panelId);
+  const panel = findPanelById(panelId);
   if (panel) { panel.url = url; saveState(); }
 }
 
 function updatePanelFontSize(panelId, fontSize) {
-  const group = getActiveGroup();
-  if (!group) return;
-  const panel = group.panels.find(p => p.id === panelId);
+  const panel = findPanelById(panelId);
   if (panel) { panel.fontSize = fontSize; saveState(); }
 }
 
 function updatePanelZoomLevel(panelId, zoomLevel) {
-  const group = getActiveGroup();
-  if (!group) return;
-  const panel = group.panels.find(p => p.id === panelId);
+  const panel = findPanelById(panelId);
   if (panel) { panel.zoomLevel = zoomLevel; saveState(); }
 }
 
 function updatePanelWidth(panelId, width) {
-  const group = getActiveGroup();
-  if (!group) return;
-  const panel = group.panels.find(p => p.id === panelId);
+  const panel = findPanelById(panelId);
   if (panel) panel.width = Math.max(300, Math.round(width));
 }
 
 function applyPanelSettings(panelId, newSettings) {
-  const group = getActiveGroup();
+  const group = findGroupByPanelId(panelId);
   if (!group) return;
   const panel = group.panels.find(p => p.id === panelId);
   if (!panel) return;
@@ -629,6 +791,10 @@ function applyPanelSettings(panelId, newSettings) {
   }
 
   saveState();
+
+  if (newSettings.groupId && newSettings.groupId !== group.id) {
+    movePanelToGroup(panelId, newSettings.groupId);
+  }
 }
 
 function rebuildTerminalPanel(panelId, panel) {
@@ -831,7 +997,8 @@ function teardownCurrentProfile() {
   // Disconnect LSP
   if (typeof disconnectAllLsp === 'function') disconnectAllLsp();
 
-  // Reset focus
+  // Reset focus and menus
+  if (typeof closePanelMoveMenu === 'function') closePanelMoveMenu();
   setFocusedPanel(null);
 }
 

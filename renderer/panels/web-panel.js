@@ -71,10 +71,11 @@ if (window.electronAPI.onWebviewFind) {
 if (window.electronAPI.onWebviewOpenInNewPanel) {
   window.electronAPI.onWebviewOpenInNewPanel(({ url, sourceWebContentsId, disposition }) => {
     const entry = webviewRegistry.get(sourceWebContentsId);
+    const targetGroupId = entry ? findGroupByPanelId(entry.panelId)?.id : undefined;
     if (disposition === 'foreground-tab' && entry) {
-      addWebPanelAfter(entry.panelId, url);
+      addWebPanelAfter(entry.panelId, url, targetGroupId);
     } else {
-      addWebPanelAtEnd(url);
+      addWebPanelAtEnd(url, targetGroupId);
     }
   });
 }
@@ -598,7 +599,13 @@ function renderWebPanel(panel, container) {
   // Store webContentsId once the webview is ready and register in webviewRegistry
   webview.addEventListener('dom-ready', () => {
     console.log(`[WebPanel] dom-ready panel=${panel.id}`);
-    webview._webContentsId = webview.getWebContentsId();
+    const prevWcId = webview._webContentsId;
+    const newWcId = webview.getWebContentsId();
+    if (prevWcId !== undefined && prevWcId !== newWcId) {
+      webviewRegistry.delete(prevWcId);
+      tlsErrorDetails.delete(prevWcId);
+    }
+    webview._webContentsId = newWcId;
     webviewRegistry.set(webview._webContentsId, {
       panelId: panel.id,
       refresh: () => refreshBtn.click(),

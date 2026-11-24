@@ -952,7 +952,7 @@ function renderFilePanel(panel, container) {
   }
 
   async function applyLspConfig(newConfig) {
-    const group = getActiveGroup();
+    const group = findGroupByPanelId(panel.id) || getActiveGroup();
     if (!group) return;
     group.lspServers = newConfig;
     saveState();
@@ -1030,14 +1030,14 @@ function renderFilePanel(panel, container) {
   }
 
   lspBtn.addEventListener('click', () => {
-    const group = getActiveGroup();
+    const group = findGroupByPanelId(panel.id) || getActiveGroup();
     if (!group) return;
     showLspSettingsModal(group, panel.rootDir, applyLspConfig);
   });
 
   // Auto-start LSP servers if previously enabled
   async function autoStartLsp() {
-    const group = getActiveGroup();
+    const group = findGroupByPanelId(panel.id) || getActiveGroup();
     if (!group || !panel.rootDir) return;
     const lspConfig = group.lspServers || [];
     const enabled = lspConfig.filter(s => s.enabled);
